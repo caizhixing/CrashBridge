@@ -43,6 +43,28 @@ test('recovery never closes reused IDs, navigated tabs, missing job hashes or fo
   assert.deepEqual(f.calls.closes, []);
 });
 
+test('recovery retains cleanup identity when an existing tab URL is unavailable', async () => {
+  const stored = interrupted();
+  const f = fixture(stored);
+  f.tabs.set(100, { id: 100 });
+  const response = await f.controller.recover();
+  assert.equal(response.ok, false);
+  assert.equal(response.error.code, 'unsupported');
+  assert.match(response.error.message, /tab URL unavailable/);
+  const state = await f.state();
+  assert.deepEqual(state.active, stored.active);
+  assert.equal(state.items[0].status, 'cancelled');
+  assert.equal(state.running, false);
+  assert.deepEqual(f.calls.closes, []);
+  assert.equal(f.calls.writes.at(-1).lastError.code, 'unsupported');
+  assert.equal((await f.manage('START_CAPTURE')).error.message, 'Capture is already running.');
+  assert.equal(f.calls.opens.length, 0);
+  f.tabs.set(100, { id: 100, url: stored.active.url });
+  assert.equal((await f.manage('CANCEL_CAPTURE')).ok, true);
+  assert.deepEqual(f.calls.closes, [100]);
+  assert.equal((await f.state()).active, null);
+});
+
 test('collecting without an active task is interrupted, clean initialization is idempotent', async () => {
   const stored = interrupted(); stored.active = null;
   const f = fixture(stored);

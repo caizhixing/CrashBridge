@@ -45,8 +45,18 @@ test('remove and clear delete captures; running mutations and duplicate starts a
   const f = fixture();
   await f.add([issue('a'), issue('b')]);
   await f.manage('START_CAPTURE');
+  const before = await f.state();
+  const resources = structuredClone(f.calls);
   for (const type of ['START_CAPTURE', 'RETRY_FAILED', 'REMOVE_ISSUE', 'CLEAR_QUEUE']) {
-    assert.equal((await f.manage(type, { key: key(issue('b')) })).ok, false);
+    const payload = type === 'REMOVE_ISSUE' ? { key: key(issue('b')) } : {};
+    const response = await f.manage(type, payload);
+    assert.deepEqual(response, {
+      ok: false,
+      error: { code: 'unsupported', message: ['START_CAPTURE', 'RETRY_FAILED'].includes(type)
+        ? 'Capture is already running.' : 'Stop capture before changing the queue.' },
+    });
+    assert.deepEqual(await f.state(), before, `${type} must not change running state`);
+    assert.deepEqual(f.calls, resources, `${type} must not write or touch browser resources`);
   }
   await f.result(); await f.result();
   assert.equal((await f.manage('REMOVE_ISSUE', { key: key(issue('a')) })).data.items.length, 1);

@@ -102,6 +102,40 @@ test('cleanup failures stop the batch, preserve completed results and expose con
   }
 });
 
+test('missing tab URL safe-stops completion and cancellation, preserving identity until verified cleanup', async () => {
+  for (const operation of ['complete', 'cancel']) {
+    const f = fixture();
+    await f.add([issue('a'), issue('b')]);
+    await f.manage('START_CAPTURE');
+    const active = (await f.state()).active;
+    const getTab = f.platform.getTab;
+    f.platform.getTab = async (id) => ({ id });
+    const response = operation === 'complete' ? await f.result() : await f.manage('CANCEL_CAPTURE');
+    assert.equal(response.ok, false, `${operation} must reject incomplete tab identity`);
+    assert.equal(response.error.code, 'unsupported');
+    assert.match(response.error.message, /tab URL unavailable/);
+    const state = await f.state();
+    assert.deepEqual(state.active, active);
+    assert.equal(state.running, false);
+    assert.deepEqual(state.items.map((item) => item.status),
+      [operation === 'complete' ? 'succeeded' : 'cancelled', 'pending']);
+    assert.deepEqual(f.calls.closes, [], 'never close an unverified tab');
+    assert.equal(f.tabs.has(active.tabId), true);
+    assert.equal((await f.manage('START_CAPTURE')).error.message, 'Capture is already running.');
+    assert.deepEqual(await f.state(), state);
+    assert.equal(f.calls.opens.length, 1, 'retained cleanup task must prevent a second capture tab');
+    f.platform.getTab = getTab;
+    assert.equal((await f.manage('CANCEL_CAPTURE')).ok, true);
+    const cleaned = await f.state();
+    assert.equal(cleaned.active, null);
+    assert.equal(cleaned.items[0].status, state.items[0].status);
+    assert.deepEqual(cleaned.items[0].capture, state.items[0].capture);
+    assert.deepEqual(f.calls.closes, [active.tabId]);
+    assert.equal((await f.manage('START_CAPTURE')).ok, true);
+    assert.equal(f.calls.opens.length, 2, 'new capture only starts after verified cleanup');
+  }
+});
+
 test('failed cancellation cleanup does not clear user data or resume capture', async () => {
   const f = fixture(); await f.add(); await f.manage('START_CAPTURE');
   f.faults.close = true;
