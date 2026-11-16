@@ -28,6 +28,7 @@
 - persisted state：`{schemaVersion:1,items:QueueItem[],active:null|{key,tabId,jobId,url,deadline},running:boolean,lastError:null|{code,message}}`。单写者串行操作；写入先验证体积。若持久化失败，返回 error，不宣称成功；保留可在 GET_STATE 看到的内存状态并标记 lastError。
 - `src/background/service-worker.js` 接 chrome API，alarm 触发 controller.handle 内部 `{namespace:'crashbridge',version:1,type:'TIMEOUT',payload:{jobId}}`；tabs.onRemoved 触发内部 TAB_CLOSED `{tabId}`。内部消息不接受 runtime 外部 sender。
 - recover 只在首次加载调用；active 若存在标记 cancelled + error cancelled（中断），核实 getTab 的 ID 和 URL（含 job hash）后清理，不继续旧批次。运行期间所有异步回调必须校验 jobId，取消后旧结果不能污染。
+- 用户补充确认：tabs.open/getTab/close 与 alarm/clearAlarm 底层失败记 unsupported + 具体原因，安全停批并保留结果；storage 失败 storage-failed + 停批，保留可见内存结果不误报持久化成功。未知 schema 拒绝写回。运行中 REMOVE_ISSUE/CLEAR_QUEUE 拒绝，须用户先取消。普通单项加载/DOM/超时错误仍继续后续。
 - `tests/background/*.test.js` ≥90% 行覆盖；service-worker Chrome 胶水 n/a。
 
 ### Issue 4：UI/manifest/docs

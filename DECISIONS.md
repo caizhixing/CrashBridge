@@ -11,7 +11,7 @@
 | 角色 | 用户选择 | 计划推理档位 | 可确认的实际配置 |
 |---|---|---|---|
 | main | 当前会话 GPT-6.1 Sol | 当前档位，未另行指定 | 模型由运行时声明为 gpt-6.1-sol；level 不可见，记 unknown |
-| worker | tb-gpt/gpt-6.1-sol | high（用户明确指定） | 尚未派单，实际模型/level 待执行参数和子 Agent 回报确认 |
+| worker | tb-gpt/gpt-6.1-sol | high（用户明确指定） | 四项实际 subagent 调用均显式传 provider=tb-gpt、model=gpt-6.1-sol、reasoning_effort=high；子 Agent 已确认收到派单参数 |
 | reviewer | tb-gpt/gpt-6.1-sol（用户在 GLM 不可用后明确改选） | high（用户明确指定，优先于 skill 的最高档默认） | 平台列出该模型并支持 high；尚未派单 |
 
 初次及后续查询仅列出 provider `tb-gpt` 的模型 `gpt-6.1-sol`，支持 medium/high/xhigh。用户先不接受同家族评审并指定 GLM-5.3 / high；在告知 GLM 尚不可调用后，用户明确改为 Reviewer 也使用 GPT-6.1 Sol / high。该最新指令构成同模型家族评审的明确例外，覆盖先前等待跨家族模型的要求。Worker 与 Reviewer 均显式传 tb-gpt/gpt-6.1-sol、reasoning_effort=high；评审保留独立上下文、独立 worktree、测试复核，承认错误相关性风险，不宣称跨模型评审。模型选型已完成；进入 PRD 草案确认，冻结前不建单或开发。
@@ -41,4 +41,24 @@ GitHub 仓库 `caizhixing/CrashBridge` 实际可见性为 PUBLIC；skill 默认�
 - 模型选择已完成：main 当前 GPT-6.1 Sol（level unknown），worker / reviewer 均为 tb-gpt/gpt-6.1-sol / high；同家族例外经用户明确授权。待确认 PRD 与 worktree 父目录后执行开发。
 - 已收到用户“继续”指令；尝试恢复持久化目标时工具返回 `the model cannot resume a paused goal; the user must resume it`。未将目标标记完成，也未绕过工具限制创建重复目标；不影响本轮整理草案。
 - 用户确认 worktree 父目录 `E:\work\CrashBridge-wt`；用户确认 v1 PRD 并选择暂无真实 DOM 样本，先开发且明确兼容性未验证。
-- 扩展具体采集边界、页面结构兼容、失败降级和导出协议待阶段 1 PRD 对谈冻结，不能把历史建议当作全部已确认需求。
+- v1 PRD 已确认冻结；精确模块附录 docs/contracts.md，任务 #1–#4 已创建并认领。生产 Firebase DOM 兼容仍未验证。
+
+## 2026-11-16：浏览器资源故障与本地数据保护
+
+背景：PRD 已覆盖单项采集错误，但未明确浏览器 tabs/alarm 操作本身失败时能否继续。用户在开发期间明确确认安全停批方案。
+
+选定：临时标签页创建/查询/关闭或 alarm 创建/清理失败，标记 unsupported 和具体原因并暂停整批，保留已取得结果；storage 写入失败为 storage-failed，保留可见内存结果、暂停批次，不静默自动重试。未知本地 schema 只报错，不覆盖旧数据。运行中删除/清空拒绝，用户必须先取消，不隐式取消运行。普通单项 timeout/login/unsupported DOM/missing-stack/tab-closed 仍逐项记录并继续。
+
+备选否决：底层资源状态不明时继续开下一页；写入失败仍报告保存成功；未知 schema 自动清空；删除动作隐式取消。
+
+影响面：src/background/queue.js 调度与错误收敛，service-worker Chrome 桥接，管理页操作禁用与 lastError 展示，相关恢复/存储/取消测试。公共消息与错误枚举不变。
+
+human-touch: 阶段 3，用户确认 PRD 未覆盖的浏览器资源故障安全停批规则（1 次）。
+
+## 2026-11-16：导出快照与清理说明
+
+管理页运行中禁止修改、重试及导出，避免变动快照；下载期间固定预览/字段选项，完成/中断分别提示，保留队列。导出包含过滤后的整个清单（含失败、待处理与取消项），符合保留失败信息的 PRD；清空先确认并明确不删除已下载文件。此处为现有动作的冲突防护/安全提示，不扩大采集范围。
+
+## 2026-11-16：页面识别支持边界
+
+暂仅精确 Android Crashlytics issue 路由；appId 使用路由字面值 android:<package>。堆栈只在限定语义区域提取且验证 Android Java/native frame；多个歧义区域 unsupported，空/无 frame missing-stack。元数据缺失或歧义留 null，不读取整页文本替代堆栈。属保守适配技术边界，不宣称真实页面已经验证。使用者为 adapter、域 validateIssue、background sender 校验与 fixtures；身份约定保持一致。
