@@ -62,7 +62,7 @@ test('capture waits for DOM then submits exactly once with domain-valid payload'
   assert.equal(message.type, 'CAPTURE_RESULT'); assert.equal(message.payload.jobId, UUID);
   assert.equal(message.payload.capture.stacktrace, STACK); assert.equal(message.payload.error, null);
   assert.equal(environment.timers.size, 0);
-  environment.observers[0].emit(); environment.listeners.get('hashchange')(); await flush();
+  environment.observers[0].emit(); environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
   assert.equal(environment.sent.length, 1); assert.match(root(document).textContent, /已保存/);
   app.dispose();
 });
@@ -91,22 +91,124 @@ test('unsupported DOM deadline and sign-in failure preserve error codes; messagi
   assert.match(root(rejected.document).textContent, /未发送/); c.dispose();
 });
 
-test('a new job is not blocked by an old in-flight reply and old reply cannot overwrite its status', async () => {
+test('a changed job fails conservatively and an old in-flight reply cannot overwrite its status', async () => {
   const document = stackDocument(JOB_URL).document; const environment = browserEnvironment(document);
   let release;
   environment.runtime.sendMessage = message => { environment.sent.push(message); return environment.sent.length === 1 ? new Promise(resolve => { release = resolve; }) : Promise.resolve({ ok: false, error: { code: 'storage-failed' } }); };
   const app = mountContent(environment);
   const next = JOB_URL.replace(UUID, '87654321-4321-4321-8321-cba987654321');
   environment.window.location.href = next; document.location.href = next;
-  environment.listeners.get('hashchange')(); await flush();
-  assert.equal(environment.sent.length, 2); assert.match(root(document).textContent, /storage-failed/);
+  environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
+  assert.equal(environment.sent.length, 2);
+  assert.equal(environment.sent[1].payload.capture, null);
+  assert.equal(environment.sent[1].payload.error.code, 'unsupported');
+  assert.match(root(document).textContent, /storage-failed/);
   release({ ok: true }); await flush(); assert.match(root(document).textContent, /storage-failed/);
   app.dispose();
 });
 
+test('readystatechange and load retry only after complete and are removed on dispose', async () => {
+  for (const trigger of ['readystatechange', 'load']) {
+    const { document } = stackDocument(JOB_URL);
+    document.readyState = 'loading';
+    const environment = browserEnvironment(document); const app = mountContent(environment);
+    assert.equal(environment.sent.length, 0);
+    assert.equal(document.listeners.get('readystatechange').size, 1);
+    assert.equal(environment.listeners.get('load').size, 1);
+    const fire = () => (trigger === 'load' ? environment.window : document).dispatchEvent({ type: trigger });
+    document.readyState = 'interactive'; fire(); await flush();
+    environment.observers[0].emit(); await flush();
+    assert.equal(environment.sent.length, 0);
+    document.readyState = 'complete'; fire(); await flush();
+    assert.equal(environment.sent.length, 1);
+    assert.equal(parseMessage(environment.sent[0]).payload.capture.stacktrace, STACK);
+    fire(); await flush(); assert.equal(environment.sent.length, 1);
+    app.dispose();
+    assert.equal(document.listeners.size, 0); assert.equal(environment.listeners.size, 0);
+    assert.equal(environment.timers.size, 0);
+    fire(); await flush(); assert.equal(environment.sent.length, 1);
+  }
+});
+
+const NEXT_UUID = '87654321-4321-4321-8321-cba987654321';
+const navigate = async (environment, url) => {
+  environment.window.location.href = url; environment.document.location.href = url;
+  environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
+};
+for (const [name, nextUrl] of [
+  ['issue and job', `${ISSUE_URL.replace('synthetic-issue', 'issue-b')}#crashbridge-job=${NEXT_UUID}`],
+  ['event and job', `${ISSUE_URL}?eventId=event-b#crashbridge-job=${NEXT_UUID}`],
+  ['job only', `${ISSUE_URL}#crashbridge-job=${NEXT_UUID}`],
+]) {
+  test(`${name} navigation never labels retained A DOM as B, even after B DOM arrives`, async () => {
+    const { document, pre } = stackDocument(JOB_URL, `${STACK}\nSYNTHETIC_A_ONLY`);
+    const environment = browserEnvironment(document); const app = mountContent(environment);
+    assert.equal(environment.sent[0].payload.capture.stacktrace, `${STACK}\nSYNTHETIC_A_ONLY`);
+    await navigate(environment, nextUrl);
+    assert.equal(environment.sent.length, 2);
+    const failed = parseMessage(environment.sent[1]).payload;
+    assert.equal(failed.jobId, NEXT_UUID); assert.equal(failed.capture, null);
+    assert.equal(failed.error.code, 'unsupported');
+    pre.textContent = `${STACK}\nSYNTHETIC_B_ONLY`;
+    environment.observers[0].emit(); await flush();
+    assert.equal(environment.sent.length, 2);
+    app.dispose();
+    // Normal background scheduling opens a new document/tab per job and still works.
+    const fresh = browserEnvironment(stackDocument(nextUrl, `${STACK}\nSYNTHETIC_B_ONLY`).document);
+    const nextApp = mountContent(fresh);
+    assert.equal(fresh.sent.length, 1);
+    assert.equal(parseMessage(fresh.sent[0]).payload.capture.stacktrace, `${STACK}\nSYNTHETIC_B_ONLY`);
+    nextApp.dispose();
+  });
+}
+
+for (const [name, nextUrl] of [
+  ['issue', `${ISSUE_URL.replace('synthetic-issue', 'issue-b')}#crashbridge-job=${UUID}`],
+  ['event', `${ISSUE_URL}?eventId=event-b#crashbridge-job=${UUID}`],
+]) {
+  test(`same job UUID cannot change ${name} while initial document is still loading`, async () => {
+    const { document, pre } = stackDocument(JOB_URL, `${STACK}\nSYNTHETIC_A_ONLY`);
+    document.readyState = 'interactive';
+    const environment = browserEnvironment(document); const app = mountContent(environment);
+    assert.equal(environment.sent.length, 0);
+    await navigate(environment, nextUrl);
+    assert.equal(environment.sent.length, 1);
+    assert.equal(environment.sent[0].payload.capture, null);
+    assert.equal(environment.sent[0].payload.error.code, 'unsupported');
+    pre.textContent = `${STACK}\nSYNTHETIC_B_ONLY`; document.readyState = 'complete';
+    document.dispatchEvent({ type: 'readystatechange' }); environment.observers[0].emit(); await flush();
+    assert.equal(environment.sent.length, 1); app.dispose();
+  });
+}
+
+test('a document initially without a job rejects an SPA-added job and binding invalidation is sticky', async () => {
+  const { document } = stackDocument(ISSUE_URL); const environment = browserEnvironment(document);
+  const app = mountContent(environment); assert.equal(environment.sent.length, 0);
+  await navigate(environment, JOB_URL);
+  assert.equal(environment.sent[0].payload.capture, null);
+  assert.equal(environment.sent[0].payload.error.code, 'unsupported');
+  app.dispose();
+  const waiting = stackDocument(JOB_URL).document; waiting.readyState = 'interactive';
+  const second = browserEnvironment(waiting); const secondApp = mountContent(second);
+  await navigate(second, ISSUE_URL); assert.equal(second.sent.length, 0);
+  waiting.readyState = 'complete'; await navigate(second, JOB_URL);
+  assert.equal(second.sent[0].payload.capture, null);
+  assert.equal(second.sent[0].payload.error.code, 'unsupported'); secondApp.dispose();
+});
+
+test('visibility attribute changes trigger a retry without mocking extraction', async () => {
+  const { document, pre } = stackDocument(JOB_URL); pre.hidden = true;
+  const environment = browserEnvironment(document); const app = mountContent(environment);
+  assert.equal(environment.sent.length, 0);
+  const filter = environment.observers[0].options.attributeFilter;
+  for (const name of ['hidden', 'aria-hidden', 'style']) assert.ok(filter.includes(name));
+  pre.hidden = false; environment.observers[0].emit({ type: 'attributes', target: pre, attributeName: 'hidden' }); await flush();
+  assert.equal(environment.sent[0].payload.capture.stacktrace, STACK); app.dispose();
+});
+
 test('route changes clear job timers and pagehide cleans observers', async () => {
   const document = makeDocument(JOB_URL); const environment = browserEnvironment(document); mountContent(environment);
-  environment.window.location.href = URL_BASE; environment.listeners.get('hashchange')(); await flush();
+  environment.window.location.href = URL_BASE; environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
   assert.equal(environment.timers.size, 0); assert.equal(environment.sent.length, 0);
-  environment.listeners.get('pagehide')(); assert.equal(environment.observers[0].disconnected, true);
+  environment.window.dispatchEvent({ type: 'pagehide' }); assert.equal(environment.observers[0].disconnected, true);
 });

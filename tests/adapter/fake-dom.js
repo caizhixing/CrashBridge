@@ -30,24 +30,67 @@ function matches(node, selector) {
   });
 }
 
+class FakeText {
+  constructor(text) { this.nodeType = 3; this.nodeValue = String(text); this.parentNode = null; }
+  get textContent() { return this.nodeValue; }
+  get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
+  get isConnected() { return Boolean(this.parentNode?.isConnected); }
+  contains(node) { return node === this; }
+  remove() { detach(this); }
+}
+function detach(node) {
+  if (node.parentNode) {
+    const nodes = node.parentNode.childNodes;
+    nodes.splice(nodes.indexOf(node), 1); node.parentNode = null;
+  }
+}
+function eventBoundary() {
+  const listeners = new Map();
+  return {
+    listeners,
+    addEventListener(name, listener) {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name).add(listener);
+    },
+    removeEventListener(name, listener) {
+      const entries = listeners.get(name); entries?.delete(listener);
+      if (!entries?.size) listeners.delete(name);
+    },
+    dispatchEvent(event) {
+      for (const listener of [...(listeners.get(event.type) ?? [])]) listener(event);
+      return true;
+    },
+  };
+}
+
 export class FakeElement {
   constructor(tagName, text = '') {
     this.tagName = tagName.toUpperCase(); this.nodeType = 1; this.attributes = new Map();
-    this.children = []; this.parentNode = null; this.listeners = new Map(); this.text = text;
-    this.checked = false; this.disabled = false; this.hidden = false;
+    this.childNodes = []; this.parentNode = null; this.listeners = new Map();
+    this.style = {}; this.rects = [{ x: 0, y: 0, width: 100, height: 20 }];
+    this.checked = false; this.disabled = false;
+    if (text) this.append(new FakeText(text));
   }
+  get children() { return this.childNodes.filter(child => child.nodeType === 1); }
+  get parentElement() { return this.parentNode?.nodeType === 1 ? this.parentNode : null; }
+  get hidden() { return this.hasAttribute('hidden'); }
+  set hidden(value) { if (value) this.setAttribute('hidden', ''); else this.removeAttribute('hidden'); }
   get className() { return this.getAttribute('class') ?? ''; }
-  get textContent() { return this.text + this.children.map(child => child.textContent).join(''); }
-  set textContent(value) { this.text = value; this.children = []; }
+  get textContent() { return this.childNodes.map(child => child.textContent).join(''); }
+  set textContent(value) {
+    for (const child of [...this.childNodes]) child.remove();
+    if (value !== '') this.append(new FakeText(value));
+  }
   get isConnected() { return this.tagName === 'HTML' || Boolean(this.parentNode?.isConnected); }
   get nextElementSibling() { const nodes = this.parentNode?.children ?? []; return nodes[nodes.indexOf(this) + 1] ?? null; }
+  getClientRects() { return this.rects; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name) ?? null; }
   hasAttribute(name) { return this.attributes.has(name); }
   removeAttribute(name) { this.attributes.delete(name); }
-  append(...children) { for (const child of children) { child.parentNode = this; this.children.push(child); } }
-  remove() { if (this.parentNode) { this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1); this.parentNode = null; } }
-  contains(node) { return node === this || this.children.some(child => child.contains(node)); }
+  append(...children) { for (const child of children) { child.remove(); child.parentNode = this; this.childNodes.push(child); } }
+  remove() { detach(this); }
+  contains(node) { return node === this || this.childNodes.some(child => child.contains(node)); }
   querySelectorAll(selector) {
     const result = [];
     for (const child of this.children) { if (matches(child, selector)) result.push(child); result.push(...child.querySelectorAll(selector)); }
@@ -69,14 +112,20 @@ export function element(tag, text = '', attrs = {}) {
 export function makeDocument(url) {
   const html = element('html'); const body = element('body'); html.append(body);
   return {
-    URL: url, location: { href: url }, documentElement: html, body,
+    ...eventBoundary(), URL: url, location: { href: url }, documentElement: html, body, readyState: 'complete',
+    defaultView: {
+      getComputedStyle(node) {
+        const block = /^(?:HTML|BODY|SECTION|DIV|PRE|P|DL|DT|DD|H2|TR|LI)$/.test(node.tagName);
+        return { display: block ? 'block' : 'inline', visibility: 'visible', contentVisibility: 'visible', ...node.style };
+      },
+    },
     querySelectorAll: selector => html.querySelectorAll(selector),
     querySelector: selector => html.querySelector(selector),
     getElementById: id => {
       const visit = node => node.getAttribute('id') === id ? node : node.children.map(visit).find(Boolean);
       return visit(html) ?? null;
     },
-    createElement: tag => element(tag), createTextNode: text => { const node = element('text', text); node.nodeType = 3; return node; },
+    createElement: tag => element(tag), createTextNode: text => new FakeText(text),
   };
 }
 export const URL_BASE = 'https://console.firebase.google.com/project/synthetic-project/crashlytics/app/android:example.synthetic';
@@ -92,11 +141,9 @@ export function addIssueRow(document, href = ISSUE_URL, title = 'Synthetic crash
   cell.append(anchor); row.append(cell); document.body.append(row); return { row, cell, anchor };
 }
 export function browserEnvironment(document, url = document.URL) {
-  const listeners = new Map(); const timers = new Map(); const sent = []; const observers = [];
-  const window = {
-    location: { href: url }, addEventListener: (name, callback) => listeners.set(name, callback),
-    removeEventListener: name => listeners.delete(name), navigation: null,
-  };
+  const timers = new Map(); const sent = []; const observers = [];
+  const window = { ...eventBoundary(), location: { href: url }, navigation: null };
+  const listeners = window.listeners;
   class Observer {
     constructor(callback) { this.callback = callback; this.disconnected = false; observers.push(this); }
     observe(target, options) { this.target = target; this.options = options; }
