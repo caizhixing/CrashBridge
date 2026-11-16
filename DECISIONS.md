@@ -69,11 +69,11 @@ human-touch: 阶段 3，用户确认 PRD 未覆盖的浏览器资源故障安全
 
 为了确保 storage 写入失败后保留的内存状态可见，管理页可见时每 2 秒 GET_STATE 只读兜底，隐藏暂停、在途合并、页面销毁停止；不联网、不触发采集。已有 GET_STATE 在下载开始后返回时，必须忽略该过期结果，下载终态再刷新。预览与 Blob 始终来自同一快照，不能用新读取覆盖下载中的预览。此为冻结预览契约的修复，不新增业务范围。
 
-## 2026-11-16：独立评审与返工记账（进行中）
+## 2026-11-16：独立评审与返工记账（评审和集成门禁已完成，待最终合并）
 
 - PR #6（domain/tooling）round 1 pass：独立 16 项测试、逐域文件 100% 行覆盖，并实际恶意输入/路径测试。
 - PR #8（background）round 1 fail：缺 URL 标签页身份被误判清理成功；3 条运行 guard 测试误传 payload，只验证了协议拒绝。rework-1 修复并增加回归；round 2 pass：23 项测试、queue 100% 行覆盖。
-- PR #5（adapter）round 1 fail：读取隐藏文本、SPA URL 先变造成旧堆栈误归属；返工中。
+- PR #5（adapter）round 1 fail：读取隐藏文本、SPA URL 先变造成旧堆栈误归属；rework-1 修复，round 2 pass：独立49项相关测试、额外28个隐藏文本交叉场景与新document采集复核通过。
 - PR #7（manager）round 1 fail：在途读取覆盖下载快照；rework-1 已补真实 manager glue 回归，round 2 pass：25 项 UI 测试，独立复现实验 12 个终态/读取时序场景通过。
 - 主 Agent 新增跨模块 pipeline 两项集成测试（实际 adapter→protocol→queue→双格式过滤导出），不是用 mock 替代被测模块。
 - 异常退出/未发布 verdict 的 reviewer 启动不计评审轮；不会将无结论任务算 pass。页面适配原 worker 多次异常且进度停滞后，主 Agent 先 interrupt，再由新的相同模型/high worker 接管原树未提交修改，不丢弃现场、不双写；评审仍由原独立 Reviewer 执行。
