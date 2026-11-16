@@ -1,0 +1,14 @@
+{
+  "name": "crashbridge",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local-only Crashlytics issue export for Chromium browsers",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "check": "node scripts/check.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/**/*.test.js",
+    "test:coverage": "node scripts/coverage.mjs"
+  }
+}
