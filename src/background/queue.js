@@ -78,6 +78,9 @@ export function createController(platform) {
     if (!alreadyClosed) {
       try {
         const tab = await platform.getTab(active.tabId);
+        if (tab && (typeof tab.url !== 'string' || !tab.url)) {
+          throw new Error('Capture tab URL unavailable; cannot verify cleanup identity.');
+        }
         if (sameTab(tab, active)) await platform.close(active.tabId);
       } catch (error) {
         report('unsupported', `Cannot clean up capture tab: ${error.message}`);
