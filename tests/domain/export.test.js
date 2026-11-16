@@ -62,6 +62,12 @@ test('Markdown escapes hostile headings/HTML and fences arbitrary stack text', (
   assert.equal(bundle.issues[0].capture.stacktrace, stacktrace);
 });
 
+test('Maximum stack with many separated backtick runs exports without argument overflow', () => {
+  const stacktrace = '`x'.repeat(100000);
+  const bundle = createBundle([succeeded({ capture: capture({ stacktrace }) })], all, at);
+  assert.ok(toMarkdown(bundle).includes('```text\n' + stacktrace + '\n```'));
+});
+
 test('Export rejects invalid queue, timestamps and options', () => {
   for (const items of [null, Array(101).fill(succeeded())]) assert.throws(() => createBundle(items, all, at));
   assert.throws(() => createBundle([], { ...all, device: 'false' }, at));

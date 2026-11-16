@@ -32,7 +32,7 @@ function inline(value) {
 
 function fenced(value) {
   const runs = value.match(/`+/g) ?? [];
-  const fence = '`'.repeat(Math.max(3, ...runs.map(run => run.length + 1)));
+  const fence = '`'.repeat(runs.reduce((length, run) => Math.max(length, run.length + 1), 3));
   return `${fence}text\n${value}\n${fence}`;
 }
 
