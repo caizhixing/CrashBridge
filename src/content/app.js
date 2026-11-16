@@ -42,6 +42,10 @@ export function mountContent(environment = {}) {
   /** @type {Map<Element,{host:Element,input:HTMLInputElement,issue:object}>} */
   const controls = new Map();
   const completed = new Set();
+  const initialJob = parseCaptureJob(window.location.href);
+  const binding = value => value ? JSON.stringify([value.jobId, issueKey(value.issue), value.issue.url]) : null;
+  const initialBinding = binding(initialJob);
+  let navigationInvalidated = false;
   let disposed = false;
   let scheduled = false;
   let job = null;
@@ -66,7 +70,10 @@ export function mountContent(environment = {}) {
 
   function syncJob() {
     const next = parseCaptureJob(window.location.href);
-    if ((next?.jobId ?? null) !== (job?.jobId ?? null)) {
+    // A URL change cannot establish ownership of a retained SPA stack. Only a new
+    // document may bind a new job/issue/event; invalidation is sticky even on return.
+    if (binding(next) !== initialBinding) navigationInvalidated = true;
+    if (binding(next) !== binding(job)) {
       if (timer !== null) clearTimer(timer);
       timer = null;
       job = next;
@@ -78,7 +85,17 @@ export function mountContent(environment = {}) {
         }, LIMITS.timeoutMs);
       }
     }
-    if (!job || completed.has(job.jobId)) return;
+    if (!job) return;
+    if (navigationInvalidated) {
+      status.textContent = '采集失败：unsupported（同一页面内采集身份已改变，请在新标签页重试）';
+      void submit(null, { code: 'unsupported', message: 'Capture identity changed within this document; retry in a new capture tab.' });
+      return;
+    }
+    if (completed.has(job.jobId)) return;
+    if (document.readyState !== 'complete') {
+      status.textContent = '等待页面加载完成（最多 60 秒）';
+      return;
+    }
     try { void submit(extractCapture(document, job.issue, now()), null); }
     catch (error) {
       pendingError = { code: ['login-required', 'missing-stack', 'unsupported'].includes(error.code) ? error.code : 'unsupported', message: error.message };
@@ -157,7 +174,9 @@ export function mountContent(environment = {}) {
     // Shadow contents are not observed; ignore mutations made by our own hosts/markers.
     if (records.some(record => !host.contains(record.target) && !record.target.closest?.('[data-crashbridge-control]') && (record.type !== 'childList' || [...record.addedNodes, ...record.removedNodes].some(node => node.nodeType !== 1 || (!node.hasAttribute('data-crashbridge-root') && !node.hasAttribute('data-crashbridge-control')))))) schedule();
   });
-  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href', 'class', 'id', 'aria-label', 'aria-labelledby', 'aria-busy', 'aria-expanded'] });
+  observer.observe(document.documentElement, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['href', 'class', 'id', 'style', 'hidden', 'aria-hidden', 'aria-label', 'aria-labelledby', 'aria-busy', 'aria-expanded'] });
+  document.addEventListener('readystatechange', schedule);
+  window.addEventListener('load', schedule);
   window.addEventListener('hashchange', schedule);
   window.addEventListener('popstate', schedule);
   // pushState often has no event. Observe href through DOM mutations and this bounded navigation hook when available.
@@ -167,6 +186,8 @@ export function mountContent(environment = {}) {
     disposed = true;
     observer.disconnect();
     if (timer !== null) clearTimer(timer);
+    document.removeEventListener('readystatechange', schedule);
+    window.removeEventListener('load', schedule);
     window.removeEventListener('hashchange', schedule);
     window.removeEventListener('popstate', schedule);
     window.navigation?.removeEventListener('navigatesuccess', schedule);

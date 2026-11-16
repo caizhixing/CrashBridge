@@ -75,6 +75,34 @@ function failure(code, message) { return Object.assign(new Error(message), { cod
 const STACK_REGIONS = 'crashlytics-stack-trace, .stacktrace, .stack-trace, [aria-label="Stack trace"], [aria-label="Stacktrace"]';
 const SEMANTIC_REGIONS = '[role="region"][aria-labelledby], section[aria-labelledby]';
 
+/** Only rendered, accessible elements may supply capture text. @param {Document} document @param {Element} element */
+function visible(document, element) {
+  if (!element.isConnected || !document.defaultView?.getComputedStyle || !element.getClientRects) return false;
+  for (let current = element; current?.nodeType === 1; current = current.parentElement) {
+    if (current.hasAttribute('hidden') || current.getAttribute('aria-hidden')?.toLowerCase() === 'true' || ['SCRIPT', 'STYLE', 'TEMPLATE', 'NOSCRIPT'].includes(current.tagName)) return false;
+    const style = document.defaultView.getComputedStyle(current);
+    if (style.display === 'none' || ['hidden', 'collapse'].includes(style.visibility) || style.contentVisibility === 'hidden') return false;
+  }
+  const style = document.defaultView.getComputedStyle(element);
+  return style.display === 'contents' || element.getClientRects().length > 0;
+}
+
+/** Walk visible text nodes rather than textContent (which includes hidden threads). @param {Document} document @param {Element} element */
+function renderedText(document, element) {
+  if (!visible(document, element)) return '';
+  if (element.tagName === 'BR') return '\n';
+  let result = '';
+  for (const child of element.childNodes) {
+    if (child.nodeType === 3) result += child.nodeValue ?? '';
+    else if (child.nodeType === 1) {
+      const text = renderedText(document, child);
+      const block = /^(?:block|list-item|table-row)$/.test(document.defaultView.getComputedStyle(child).display);
+      result += text && block ? `\n${text}\n` : text;
+    }
+  }
+  return result;
+}
+
 /** @param {Document} document @returns {Element[]} */
 function stackRegions(document) {
   const regions = new Set(document.querySelectorAll(STACK_REGIONS));
@@ -83,7 +111,8 @@ function stackRegions(document) {
     const labels = labelIds.map(id => document.getElementById(id)?.textContent?.trim() ?? '');
     if (labels.length === 1 && /^(?:Stack trace|Stacktrace)$/i.test(labels[0])) regions.add(region);
   }
-  return [...regions].filter(region => ![...regions].some(other => other !== region && other.contains(region)));
+  const rendered = [...regions].filter(region => visible(document, region));
+  return rendered.filter(region => !rendered.some(other => other !== region && other.contains(region)));
 }
 
 /** Narrow dl semantics only; missing or ambiguous values remain null. @param {Document} document @param {string[]} labels */
@@ -92,10 +121,10 @@ function field(document, labels) {
   const regions = document.querySelectorAll('crashlytics-event-details, .event-details, [aria-label="Event details"], [aria-label="Issue statistics"]');
   const terms = new Set([...regions].flatMap(region => [...region.querySelectorAll('dl dt')]));
   for (const term of terms) {
-    if (!labels.includes(term.textContent?.trim().toLowerCase())) continue;
+    if (!labels.includes(renderedText(document, term).trim().toLowerCase())) continue;
     const value = term.nextElementSibling;
     if (value?.tagName === 'DD') {
-      const text = value.textContent?.trim();
+      const text = renderedText(document, value).trim();
       if (text && text.length <= 1000) values.push(text);
     }
   }
@@ -122,10 +151,10 @@ export function extractCapture(document, issue, now) {
   const regions = stackRegions(document);
   if (regions.length !== 1) throw failure('unsupported', 'No unique supported stack trace region was found.');
   const region = regions[0];
-  const blocks = [...region.querySelectorAll('pre, [role="code"]')];
+  const blocks = [...region.querySelectorAll('pre, [role="code"]')].filter(block => visible(document, block));
   // A single nested code block is acceptable; concatenating unknown independent blocks is not.
   if (blocks.length > 1) throw failure('unsupported', 'Multiple stack blocks cannot be safely identified as one event.');
-  const stack = (blocks[0] ?? region).textContent?.trim() ?? '';
+  const stack = renderedText(document, blocks[0] ?? region).trim();
   if (!/(?:^|\n)\s*(?:at\s+[\w.$]+\([^\n]*\)|#\d+\s+pc\s+[\da-f]+\b)/im.test(stack)) throw failure('missing-stack', 'No rendered Android stack frames were found.');
   const partial = stack.length > LIMITS.maxStackLength || Boolean(region.querySelector('[aria-expanded="false"], [aria-busy="true"]'));
   const warnings = ['Real Firebase console DOM compatibility has not been verified.', 'Only the currently displayed representative event is captured; latest event and completeness are not verified.'];

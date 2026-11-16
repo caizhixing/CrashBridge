@@ -77,6 +77,67 @@ test('unscoped page/pre text is never a stack; empty/exception-only region fails
   }
 });
 
+const hideCases = [
+  ['hidden', node => { node.hidden = true; }],
+  ['aria-hidden', node => node.setAttribute('aria-hidden', 'true')],
+  ['display none', node => { node.style.display = 'none'; }],
+  ['visibility hidden', node => { node.style.visibility = 'hidden'; }],
+  ['visibility collapse', node => { node.style.visibility = 'collapse'; }],
+  ['contentVisibility hidden', node => { node.style.contentVisibility = 'hidden'; }],
+  ['no layout rects', node => { node.rects = []; }],
+];
+for (const [name, hide] of hideCases) {
+  test(`${name}: hidden region/block cannot supply a stack and hidden descendants never leak`, () => {
+    for (const target of ['section', 'pre']) {
+      const fixture = stackDocument(ISSUE_URL, `${STACK}\nSYNTHETIC_HIDDEN_DATA`);
+      hide(fixture[target]);
+      assert.throws(() => extractCapture(fixture.document, issue, NOW), code(target === 'section' ? 'unsupported' : 'missing-stack'));
+    }
+    const { document, pre } = stackDocument();
+    const secret = element('span', '\nSYNTHETIC_HIDDEN_DATA\n    at example.secret.Hidden.run(Hidden.java:1)');
+    hide(secret); pre.append(secret);
+    // textContent intentionally sees hidden children, like the browser DOM.
+    assert.match(pre.textContent, /SYNTHETIC_HIDDEN_DATA/);
+    assert.equal(extractCapture(document, issue, NOW).stacktrace, STACK);
+    pre.textContent = 'Exception only'; pre.append(secret);
+    assert.throws(() => extractCapture(document, issue, NOW), code('missing-stack'));
+  });
+}
+
+test('hidden competing regions and blocks do not obscure the one visible stack', () => {
+  const { document, section } = stackDocument();
+  const hiddenRegion = element('div', STACK, { class: 'stacktrace', hidden: '' });
+  document.body.append(hiddenRegion);
+  section.append(element('pre', 'SYNTHETIC_HIDDEN_DATA', { 'aria-hidden': 'true' }));
+  assert.equal(extractCapture(document, issue, NOW).stacktrace, STACK);
+});
+
+test('text-node traversal preserves literal newlines, br, block lines, Java/native frames and cause chains', () => {
+  const { document, pre } = stackDocument(ISSUE_URL, 'Fatal Exception: java.lang.Exception: synthetic');
+  pre.append(element('br'), element('span', '    at example.synthetic.Main.run(Main.java:42)'), element('br'));
+  pre.append(document.createTextNode('Caused by: java.io.IOException: synthetic\n'));
+  const native = element('span', '    #00 pc 000000000001abcd /synthetic/libexample.so');
+  pre.append(native, element('div', '    at example.synthetic.Loader.load(Loader.java:8)'));
+  const contents = element('span', '\n    at example.synthetic.More.run(More.java:1)');
+  contents.style.display = 'contents'; contents.rects = []; pre.append(contents);
+  assert.equal(pre.childNodes[0].nodeType, 3);
+  const stack = extractCapture(document, issue, NOW).stacktrace;
+  assert.equal(stack, 'Fatal Exception: java.lang.Exception: synthetic\n    at example.synthetic.Main.run(Main.java:42)\nCaused by: java.io.IOException: synthetic\n    #00 pc 000000000001abcd /synthetic/libexample.so\n    at example.synthetic.Loader.load(Loader.java:8)\n\n    at example.synthetic.More.run(More.java:1)');
+  pre.textContent = 'Synthetic native crash\n    #01 pc 0000abcd /synthetic/libexample.so';
+  assert.equal(extractCapture(document, issue, NOW).stacktrace, pre.textContent);
+});
+
+test('hidden metadata descendants do not leak through optional fields', () => {
+  const { document } = stackDocument();
+  const details = element('section', '', { 'aria-label': 'Event details' });
+  const dl = element('dl'); const value = element('dd', '1.2');
+  value.append(element('span', 'SYNTHETIC_HIDDEN_DATA', { hidden: '' }));
+  dl.append(element('dt', 'App version'), value); details.append(dl); document.body.append(details);
+  assert.equal(extractCapture(document, issue, NOW).appVersion, '1.2');
+  details.hidden = true;
+  assert.equal(extractCapture(document, issue, NOW).appVersion, null);
+});
+
 test('ambiguous regions/blocks reject; nested named regions do not duplicate', () => {
   const { document, section } = stackDocument();
   section.append(element('pre', STACK));
