@@ -2,7 +2,7 @@ export const DEFAULT_OPTIONS = Object.freeze({ stacktrace: true, version: true, 
 export const COMPATIBILITY_WARNING = '真实 Firebase 控制台兼容性未验证：仅通过合成样本测试，不代表已适配你的页面。';
 export const PRIVACY_WARNING = '自动隐私清理不保证覆盖全部敏感信息。关闭字段只影响导出，不删除本地暂存；分享前请人工检查。';
 const STATUS = Object.freeze({ pending: '待采集', collecting: '采集中', succeeded: '已取得', failed: '失败', cancelled: '已取消 / 中断' });
-const ERRORS = Object.freeze({ unsupported: '页面布局或地址不受支持，请勿将其视为采集成功。', 'login-required': '登录已失效，请在 Firebase 手动登录后重试。', timeout: '采集超时（60 秒），请检查网络 / 代理后重试。', 'tab-closed': '采集标签页被关闭，可重试失败项。', 'missing-stack': '未取得堆栈，本项采集失败。', cancelled: '采集已取消或中断，开始采集可继续处理。', 'storage-failed': '本地保存失败：当前结果可能尚未持久化，请勿关闭管理页，先导出备份。', 'download-failed': '下载失败或被拒绝。清单与预览已保留，请允许下载后重试。' });
+const ERRORS = Object.freeze({ unsupported: '页面布局或地址不受支持，请勿将其视为采集成功。', 'login-required': '登录已失效，请在 Firebase 手动登录后重试。', timeout: '采集超时（60 秒），请检查网络 / 代理后重试。', 'tab-closed': '采集标签页被关闭，可重试失败项。', 'missing-stack': '未取得堆栈，本项采集失败。', cancelled: '采集已取消或中断，开始采集可继续处理。', 'storage-failed': '本地保存失败：当前结果可能尚未持久化，请勿关闭管理页。若采集仍活动，请先取消并等待临时页清理完成，再导出备份。', 'download-failed': '下载失败或被拒绝。清单与预览已保留，请允许下载后重试。' });
 
 /** @param {{code:string,message:string}|null} error */
 export function errorText(error) {

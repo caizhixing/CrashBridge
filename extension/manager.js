@@ -120,7 +120,13 @@ async function refresh() {
 }
 
 async function drainRefresh() {
-  if (refreshQueued) { refreshQueued = false; await stateSync.request(); }
+  if (refreshQueued) {
+    refreshQueued = false;
+    const version = requestVersion;
+    await stateSync.request();
+    // A superseded read can still occupy stateSync's single request slot.
+    if (version === requestVersion && !busy && !downloader.active) await stateSync.request();
+  }
 }
 
 async function mutate(type, key) {
@@ -147,6 +153,9 @@ for (const field of Object.keys(DEFAULT_OPTIONS)) byId(`field-${field}`).addEven
 byId('preview-format').addEventListener('change', renderPreview);
 for (const format of ['json', 'markdown']) byId(`download-${format}`).addEventListener('click', async () => {
   if (!snapshot || !controlsFor(state, busy || downloader.active).export) return;
+  // Any GET_STATE begun before this click must not replace the exported preview.
+  ++requestVersion;
+  refreshQueued = true;
   const downloading = downloader.download(format, snapshot, status => {
     setText(byId('download-status'), status);
     byId('download-status').classList.toggle('item-error', status.startsWith('download-failed'));
