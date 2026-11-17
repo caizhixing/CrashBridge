@@ -59,11 +59,13 @@
 
 用户确认方案及行为以 docs/prd/real-list-hotfix.md 为准；不改变旧 schema1、IssueRef、去重key或既有消息语义。新增独立 adapter/selection.js 与 background/resolver.js。
 
-- RESOLVE_SELECTION `{listUrl,snapshot:[{title,subtitle,href}],selected:[index]}`：顶层自身扩展 Firebase 源列表content请求；listUrl与sender原始列表URL匹配，身份/长度/数量校验，最多100行，标题/副标题仅临时匹配不作ID。
+- RESOLVE_SELECTION `{listUrl,snapshot:[{title,subtitle,href,cells}],selected:[index]}`：顶层自身扩展 Firebase 源列表content请求；listUrl与sender原始列表URL匹配，身份/长度/数量校验，最多100行，标题/副标题仅临时匹配不作ID。cells为gridcell数量，是结构校验而非身份。
 - GET_RESOLUTION `{}`：仅发起的源列表tab/frame0读取自己的解析进度/错误，不能取得其他tab状态。
-- RESOLVER_READY `{}`：仅后台owned临时tab/frame0握手；必须绑定当前随机解析任务标识，不能由源列表冒充。
+- RESOLVER_READY `{token}`：仅后台owned临时tab/frame0握手；必须绑定当前随机解析任务标识及精确URL，不能由源列表冒充。
+- CANCEL_RESOLUTION `{}`：仅发起源列表tab/frame0取消，安全清理后释放；未知标签身份保留active及错误，不能误关或继续新建。
 - OPEN_MANAGER `{}`：仅顶层自身Firebase content请求打开manager，不接受外站。
-- tabs.sendMessage内部 RESOLVE_ROW `{snapshot,index}`：只给owned临时列表tab（任务标识绑定），content重建完整有序快照，匹配唯一row fingerprint，才可点击标题；真实detail通过tabs.onUpdated匹配project/app后交现有controller ADD_ISSUES，以真实临时Firebase sender身份执行，不削弱旧校验。
+- tabs.sendMessage内部 RESOLVE_ROW `{token,snapshot,index}`：只给owned临时列表tab（任务标识绑定），content重建完整有序快照，匹配唯一row fingerprint，才可点击标题；真实detail通过tabs.onUpdated匹配project/app后交现有controller ADD_ISSUES，以真实临时Firebase sender身份执行，不削弱旧校验。
+- tabs.sendMessage内部 CHECK_SELECTION `{snapshot,index}`：只核验发起源列表快照，绝不点击原列表；接收者校验扩展sender和顶层frame。
 - 增加精确selection.js WAR但不增加权限，session storage仅解析状态；重启中断可见，capture和resolve互斥。
 - 消息固定namespace/version1；所有新增消息必须校验extension id、tab和frame0、来源/任务标识、payload形状及大小。未知/伪造/过期拒绝，不改Firebase状态、不读私有Angular数据。
 
