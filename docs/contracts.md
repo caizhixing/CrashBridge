@@ -55,6 +55,18 @@
 
 返回统一 `{ok:true,data}` / `{ok:false,error:{code,message}}`。GET_STATE data 是 state；变更操作 data 也返回 state（ADD_ISSUES 可在 data 同级 added/duplicates 数字，UI 不依赖其存在）。只允许 extension manager URL 发管理消息；GET_STATE 也只给 manager；ADD_ISSUES 要求 Firebase 同源 tab、sender.id 为自身扩展，且每个 issue 项目/App 与列表 sender URL 匹配；CAPTURE_RESULT 匹配 tab/job/issue 与 URL 身份。
 
+## 2026-11-17 授权新增：真实列表路由解析
+
+用户确认方案及行为以 docs/prd/real-list-hotfix.md 为准；不改变旧 schema1、IssueRef、去重key或既有消息语义。新增独立 adapter/selection.js 与 background/resolver.js。
+
+- RESOLVE_SELECTION `{listUrl,snapshot:[{title,subtitle,href}],selected:[index]}`：顶层自身扩展 Firebase 源列表content请求；listUrl与sender原始列表URL匹配，身份/长度/数量校验，最多100行，标题/副标题仅临时匹配不作ID。
+- GET_RESOLUTION `{}`：仅发起的源列表tab/frame0读取自己的解析进度/错误，不能取得其他tab状态。
+- RESOLVER_READY `{}`：仅后台owned临时tab/frame0握手；必须绑定当前随机解析任务标识，不能由源列表冒充。
+- OPEN_MANAGER `{}`：仅顶层自身Firebase content请求打开manager，不接受外站。
+- tabs.sendMessage内部 RESOLVE_ROW `{snapshot,index}`：只给owned临时列表tab（任务标识绑定），content重建完整有序快照，匹配唯一row fingerprint，才可点击标题；真实detail通过tabs.onUpdated匹配project/app后交现有controller ADD_ISSUES，以真实临时Firebase sender身份执行，不削弱旧校验。
+- 增加精确selection.js WAR但不增加权限，session storage仅解析状态；重启中断可见，capture和resolve互斥。
+- 消息固定namespace/version1；所有新增消息必须校验extension id、tab和frame0、来源/任务标识、payload形状及大小。未知/伪造/过期拒绝，不改Firebase状态、不读私有Angular数据。
+
 ## 离线命令
 
 Node v24.18.0，无 npm install。package.json 主 Agent 建立并固定：
