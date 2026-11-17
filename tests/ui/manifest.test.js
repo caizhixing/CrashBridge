@@ -12,7 +12,7 @@ test('MV3 requests exactly frozen permissions and Firebase-only injection/resour
   assert.deepEqual(manifest.background, { service_worker: 'src/background/service-worker.js', type: 'module' });
   assert.equal(Object.hasOwn(manifest.action, 'default_popup'), false);
   assert.deepEqual(manifest.content_scripts, [{ matches: ['https://console.firebase.google.com/*'], js: ['src/content/main.js'], run_at: 'document_idle' }]);
-  assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['src/content/app.js', 'src/adapter/firebase.js', 'src/domain/model.js'], matches: ['https://console.firebase.google.com/*'] }]);
+  assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['src/content/app.js', 'src/adapter/firebase.js', 'src/adapter/selection.js', 'src/domain/model.js'], matches: ['https://console.firebase.google.com/*'] }]);
   assert.doesNotMatch(JSON.stringify(manifest), /cookies|debugger|webRequest|<all_urls>|https?:\/\/(?!console\.firebase\.google\.com)/);
   assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self'; object-src 'none'; base-uri 'none'");
 });

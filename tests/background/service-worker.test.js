@@ -16,12 +16,12 @@ const event = () => {
   let stored = null;
   let next = 100;
   const chrome = {
-    storage: { local: {
+    storage: { session: { get: async () => ({}), set: async () => {} }, local: {
       get: async (key) => ({ [key]: stored }),
       set: async (value) => { stored = structuredClone(value.crashbridge); },
     } },
     tabs: {
-      onRemoved: event(),
+      onRemoved: event(), onUpdated: event(),
       create: async (options) => { const tab = { id: next++, ...options }; tabs.set(tab.id, tab); created.push(tab); return tab; },
       get: async (id) => { if (!tabs.has(id)) throw new Error(`No tab with id: ${id}`); return tabs.get(id); },
       remove: async (id) => { tabs.delete(id); removed.push(id); },

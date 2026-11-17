@@ -30,7 +30,7 @@ test('UTF-8 4 MiB guard checks cumulative captures before writing without deleti
     const value = capture(issue(`large-${n}`)); value.stacktrace = '界'.repeat(200000);
     last = await f.controller.handle(message('CAPTURE_RESULT', {
       jobId: active.jobId, issueKey: active.key, capture: value, error: null,
-    }), { id: manager.id, tab: { id: active.tabId }, url: active.url });
+    }), { id: manager.id, frameId: 0, tab: { id: active.tabId }, url: active.url });
   }
   assert.equal(last.ok, false);
   assert.equal(last.error.code, 'storage-failed');

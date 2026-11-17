@@ -23,7 +23,7 @@ test('real adapter -> validated queue -> filtered preview/dual export preserves 
     jobId: active.jobId, issueKey: active.key, capture, error: null,
   }));
   const reply = await f.controller.handle(result, {
-    id: manager.id, tab: { id: active.tabId }, url: active.url,
+    id: manager.id, frameId: 0, tab: { id: active.tabId }, url: active.url,
   });
   assert.equal(reply.ok, true);
   const state = reply.data;
@@ -55,7 +55,7 @@ test('failed detail capture survives export with precise error and can be retrie
     jobId: active.jobId, issueKey: active.key, capture: null,
     error: { code: 'missing-stack', message: 'Synthetic unsupported rendered frame content.' },
   }));
-  assert.equal((await f.controller.handle(result, { id: manager.id, tab: { id: active.tabId }, url: active.url })).ok, true);
+  assert.equal((await f.controller.handle(result, { id: manager.id, frameId: 0, tab: { id: active.tabId }, url: active.url })).ok, true);
   const state = await f.state();
   assert.equal(state.items[0].status, 'failed');
   const snapshot = createExportSnapshot(state.items, DEFAULT_OPTIONS, f.platform.now(), { createBundle, toMarkdown });
