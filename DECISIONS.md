@@ -1,5 +1,13 @@
 # CrashBridge 决策日志
 
+## 2026-11-17：真实列表没有 Issue ID 的入队修复
+
+背景：用户授权在独立 Ego Lite 上调试 Firebase/CrashBridge，禁止访问其他内容或导出真实数据。实测列表4条标题链接均href=#，无DOM ID属性；原按钮在viewport下且disabled，管理页为空。点击单个标题可导航真实详情URL，随后返回列表，未读取堆栈/修改状态。
+
+用户明确选择：独立CrashBridge勾选+固定工具栏+临时标签页只读导航解析真实ID，原列表不改变；歧义或快照变动失败，不按标题去重。被否备选：保留不适用旧实现；凭标题/行号伪造ID；读取Angular内部状态或私有接口。
+
+影响面：adapter/content行发现与本地临时选择、固定UI；background受控标签解析与capture互斥；新增解析消息验证及精确WAR；旧IssueRef/导出schema/复合去重key不变。验收与降级详见docs/prd/real-list-hotfix.md。模型与Public隐私豁免沿用，worker/reviewer显式gpt-6.1-sol high。真实DOM结构仅记匿名摘要，实际URL/标题/ID不进入仓库或GitHub。只验证当前Ego列表，不扩称Chrome/Edge或堆栈采集已验收。
+
 ## 2026-11-16：多 Agent 流程与模型选择（选型已完成）
 
 ### 背景
