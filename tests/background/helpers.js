@@ -7,7 +7,7 @@ export const issue = (id = 'synthetic-issue', projectId = 'synthetic-project', a
 });
 export const key = (value) => JSON.stringify([value.projectId, value.appId, value.issueId]);
 export const source = (value = issue()) => ({
-  id: manager.id, tab: { id: 7 },
+  id: manager.id, frameId: 0, tab: { id: 7 },
   url: `https://console.firebase.google.com/project/${value.projectId}/crashlytics/app/${value.appId}/issues`,
 });
 export const message = (type, payload = {}) => ({ namespace: 'crashbridge', version: 1, type, payload });
@@ -57,7 +57,7 @@ export function fixture(stored = null) {
       return controller.handle(message('CAPTURE_RESULT', {
         jobId: active.jobId, issueKey: active.key,
         capture: error ? null : capture(value ?? item.issue), error,
-      }), { id: manager.id, tab: { id: active.tabId }, url: active.url });
+      }), { id: manager.id, frameId: 0, tab: { id: active.tabId }, url: active.url });
     },
   };
 }

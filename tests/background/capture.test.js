@@ -28,7 +28,7 @@ test('capture callbacks require tab, job, issue, exact job URL and capture ident
   const before = await f.state();
   const active = before.active;
   const valid = { jobId: active.jobId, issueKey: active.key, capture: capture(), error: null };
-  const sender = { id: manager.id, tab: { id: active.tabId }, url: active.url };
+  const sender = { id: manager.id, frameId: 0, tab: { id: active.tabId }, url: active.url };
   for (const [payload, alteredSender] of [
     [{ ...valid, jobId: '00000000-0000-4000-8000-000000000099' }, sender],
     [{ ...valid, issueKey: key(issue('other')) }, sender],
@@ -93,7 +93,7 @@ test('cancel is serialized with pending open, clears current task and rejects la
   assert.equal(f.calls.opens.length, 1);
   const old = f.calls.opens[0];
   const payload = { jobId: '00000000-0000-4000-8000-000000000001', issueKey: key(issue('a')), capture: capture(issue('a')), error: null };
-  assert.equal((await f.controller.handle(message('CAPTURE_RESULT', payload), { id: manager.id, tab: { id: old.id }, url: old.url })).ok, false);
+  assert.equal((await f.controller.handle(message('CAPTURE_RESULT', payload), { id: manager.id, frameId: 0, tab: { id: old.id }, url: old.url })).ok, false);
   assert.deepEqual(await f.state(), state);
   f.platform.open = originalOpen;
   await f.manage('START_CAPTURE');

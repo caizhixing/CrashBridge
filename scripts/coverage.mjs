@@ -10,6 +10,7 @@ export async function coverage(root = process.cwd()) {
   const domain = (await files(path.join(root, 'src', 'domain'))).filter(file => file.endsWith('.js'));
   if (!domain.length) throw new Error('No domain modules found');
   const queue = await requireFile(path.join(root, 'src', 'background', 'queue.js'));
+  const stateModules = (await files(path.join(root, 'src', 'background'))).filter(file => file.endsWith('.js') && !file.endsWith('service-worker.js'));
   const tests = (await files(path.join(root, 'tests'))).filter(file => file.endsWith('.test.js'));
   if (!tests.length) throw new Error('No tests found');
   const temporary = await mkdtemp(path.join(os.tmpdir(), 'crashbridge-coverage-'));
@@ -38,9 +39,9 @@ export async function coverage(root = process.cwd()) {
       throw new Error('Tests failed or native coverage report missing');
     }
     let failed = false;
-    for (const file of [...domain, queue]) {
+    for (const file of [...domain, ...stateModules]) {
       const entry = summary.files.find(entry => path.resolve(entry.path) === path.resolve(file));
-      const threshold = file === queue ? 90 : 100;
+      const threshold = stateModules.includes(file) ? 90 : 100;
       const percent = entry ? entry.coveredLinePercent : 0;
       console.log(`${path.relative(root, file).replaceAll(path.sep, '/')}: ${percent.toFixed(2)}% lines (required ${threshold}%)${entry ? '' : ' — NOT LOADED'}`);
       if (!entry || percent < threshold || (threshold === 100 && entry.coveredLineCount !== entry.totalLineCount)) failed = true;

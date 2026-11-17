@@ -234,7 +234,7 @@ export function createController(platform) {
   }
 
   function firebaseSender(sender) {
-    if (!ownSender(sender) || !Number.isInteger(sender.tab?.id)) return null;
+    if (!ownSender(sender) || !Number.isInteger(sender.tab?.id) || sender.frameId !== 0) return null;
     try {
       const url = new URL(sender.url);
       if (url.origin !== 'https://console.firebase.google.com') return null;
@@ -284,6 +284,8 @@ export function createController(platform) {
         }
         if (state.items.length + additions.length > LIMITS.maxIssues) throw new Error('Queue limit is 100 issues.');
         state.items.push(...additions);
+        if (!await save()) return failure(state.lastError);
+        return { ...success(), added: additions.length, duplicates: payload.issues.length - additions.length };
       } else if (type === 'CAPTURE_RESULT') {
         const active = state.active;
         const source = firebaseSender(sender);

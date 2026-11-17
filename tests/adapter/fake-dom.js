@@ -3,7 +3,7 @@
 function splitSelectors(selector) { return selector.split(',').map(part => part.trim()); }
 function simpleMatches(node, selector) {
   if (node.nodeType !== 1) return false;
-  const attrs = [...selector.matchAll(/\[([\w-]+)(?:(\^?=)"([^"]*)")?\]/g)];
+  const attrs = [...selector.matchAll(/\[([\w-]+)(?:([*~^]?=)"([^"]*)")?\]/g)];
   const head = selector.replace(/\[[^\]]+\]/g, '');
   if (head.startsWith('.')) {
     if (!node.className.split(/\s+/).includes(head.slice(1))) return false;
@@ -11,7 +11,7 @@ function simpleMatches(node, selector) {
   else if (head && node.tagName.toLowerCase() !== head.toLowerCase()) return false;
   return attrs.every(([, name, operator, expected]) => {
     const value = node.getAttribute(name);
-    return operator === '=' ? value === expected : operator === '^=' ? value?.startsWith(expected) : value !== null;
+    return operator === '=' ? value === expected : operator === '^=' ? value?.startsWith(expected) : operator === '*=' ? value?.includes(expected) : operator === '~=' ? value?.split(/\s+/).includes(expected) : value !== null;
   });
 }
 function matches(node, selector) {
