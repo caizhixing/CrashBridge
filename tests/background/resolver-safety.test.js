@@ -79,7 +79,8 @@ test('activation is sticky before/after detail event, missing active is fail-clo
     await f.resolver.handle(message('CANCEL_RESOLUTION'), sender);
     assert.deepEqual(f.queue.calls.closes, []); assert.equal(f.resolver.busy(), true);
     const restart = createResolver(f.platform, f.queue.controller); await restart.recover();
-    assert.deepEqual(f.queue.calls.closes, []); assert.equal(restart.busy(), true);
+    assert.deepEqual(f.queue.calls.closes, [id]); assert.equal(restart.busy(), false);
+    assert.equal((await restart.handle(message('GET_RESOLUTION'), sender)).data.error, null);
     f.queue.tabs.delete(id); await restart.closed(id); assert.equal(restart.busy(), false);
   }
 });
@@ -129,23 +130,27 @@ test('activation emitted before tabs.create returns stays sticky even after swit
   assert.equal((await f.queue.state()).items.length, 0); assert.equal(f.queue.calls.closes.includes(openedId), false);
 });
 
-test('restart does not treat persisted same-app resolved URL as proof of click ownership', async () => {
+test('restart completes a persisted verified resolution as succeeded without enqueueing from persisted state', async () => {
   const f = await setup(); await f.ready();
   const stored = f.saved(); const id = f.active.tabId; const url = issue('unverified-persisted').url;
   stored.active.resolvedUrl = url; stored.active.phase = 'clicked';
   f.queue.tabs.set(id, { id, url, active: false });
   const restart = createResolver({ ...f.platform, readSession: async () => stored }, f.queue.controller);
   const reply = await restart.recover();
-  assert.equal(reply.data.running, false); assert.equal(restart.busy(), true);
-  assert.deepEqual(f.queue.calls.closes, []); assert.equal((await f.queue.state()).items.length, 0);
+  assert.equal(reply.data.running, false); assert.equal(reply.data.results[0].status, 'succeeded');
+  assert.equal(reply.data.results[0].error, null); assert.equal(reply.data.error, null);
+  assert.equal(restart.busy(), false);
+  assert.deepEqual(f.queue.calls.closes, [id]); assert.equal((await f.queue.state()).items.length, 0);
 });
 
-test('active/missing-active cleanup and recovery never close a user-visible temporary tab even at exact owned URL', async () => {
+test('restart recovery closes a temp tab at the exact owned URL without activation checks or a lock', async () => {
   for (const active of [true, undefined]) {
     const f = await setup(); const id = f.active.tabId;
     f.queue.tabs.set(id, { id, url: f.active.url, ...(active === undefined ? {} : { active }) });
     const restart = createResolver(f.platform, f.queue.controller); await restart.recover();
-    assert.deepEqual(f.queue.calls.closes, []); assert.equal(restart.busy(), true);
-    assert.match((await restart.handle(message('GET_RESOLUTION'), sender)).data.error.message, /activated or taken over/);
+    assert.deepEqual(f.queue.calls.closes, [id]); assert.equal(restart.busy(), false);
+    const reply = await restart.handle(message('GET_RESOLUTION'), sender);
+    assert.equal(reply.data.error, null); assert.equal(reply.data.running, false);
+    assert.match(reply.data.results[0].error.message, /Extension restarted during resolution/);
   }
 });

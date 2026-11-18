@@ -59,6 +59,19 @@ export function createResolver(platform, controller) {
       return false;
     }
   }
+  async function recoverCleanup() {
+    // In-memory intervention memory does not survive a restart, so recovery only
+    // trusts the persisted token-bearing URL (or the already verified detail URL)
+    // before closing; activation state is irrelevant for a tab we opened ourselves.
+    const active = state.active;
+    state.active = null;
+    try {
+      await platform.clearAlarm(active.token);
+      const tab = await platform.getTab(active.tabId);
+      const safeDetail = typeof active.resolvedUrl === 'string' && tab?.url === active.resolvedUrl;
+      if (tab && (tab.url === active.url || safeDetail)) await platform.close(active.tabId);
+    } catch { /* Best effort: a temp tab that cannot be re-verified stays open and never blocks the batch. */ }
+  }
   async function next() {
     if (!state.running) return;
     const entry = state.results.find(entry => entry.status === 'pending');
@@ -109,13 +122,26 @@ export function createResolver(platform, controller) {
       }
     }
     if (state?.running || state?.active) {
-      state.running = false;
-      state.error = { code: 'cancelled', message: 'Resolution interrupted by extension restart; select again to retry.' };
-      for (const entry of state.results) if (['pending', 'resolving'].includes(entry.status)) { entry.status = 'failed'; entry.error = state.error; }
-      // A persisted detail URL cannot re-establish click ownership after restart.
-      // Only the rebuilt token-bearing list URL remains independently verifiable.
-      if (state.active) delete state.active.resolvedUrl;
-      await cleanup(); await save();
+      // An MV3 service worker can suspend at any await; a restart is not user
+      // cancellation. Resume the batch from the persisted phase instead of voiding it.
+      state.error = null;
+      const active = state.active;
+      if (active) {
+        const entry = state.results.find(entry => entry.index === active.index);
+        if (active.phase === 'clicked' && typeof active.resolvedUrl === 'string') {
+          // resolvedUrl is persisted only after updated() verified the detail route
+          // live, so this row was already resolved; only bookkeeping was interrupted.
+          if (entry.status === 'resolving') { entry.status = 'succeeded'; entry.error = null; }
+        } else if (entry.status === 'resolving') {
+          // The content-script handshake (RESOLVER_READY) is sent once and is not
+          // replayed after a restart, so the in-flight row can only be retried.
+          entry.status = 'failed';
+          entry.error = { code: 'cancelled', message: 'Extension restarted during resolution; select again to retry this row.' };
+        }
+        await recoverCleanup();
+      }
+      await save();
+      await next();
     }
     return result();
   }

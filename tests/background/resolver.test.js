@@ -86,7 +86,7 @@ test('never-settling content response is bounded; queued cancellation and timeou
   assert.equal(f.resolver.busy(), false); assert.equal(f.queue.tabs.has(7), true); assert.equal((await f.get()).data.running, false);
 });
 
-test('timeout/closed/restart cancel pending state and reject stale events without permanent lock', async () => {
+test('timeout/closed stop single entries; restart resumes the remaining batch without a permanent lock', async () => {
   const f = setup(); await f.start(); const first = f.current();
   await f.resolver.timeout('stale'); await f.resolver.timeout(first.token); assert.equal(f.queue.calls.opens.length, 1);
   f.advance(); await f.resolver.timeout(first.token); assert.equal((await f.get()).data.results[0].error.code, 'timeout');
@@ -94,8 +94,17 @@ test('timeout/closed/restart cancel pending state and reject stale events withou
   assert.equal((await f.get()).data.results[1].error.code, 'tab-closed'); assert.equal(f.resolver.busy(), false);
   await f.start(); const interrupted = f.saved();
   const restart = createResolver(f.platform, f.queue.controller); const reply = await restart.recover();
-  assert.equal(reply.data.running, false); assert.equal(reply.data.results[0].error.code, 'cancelled'); assert.equal(restart.busy(), false);
-  assert.equal(f.queue.calls.opens.length, 3); assert.ok(interrupted.active);
+  assert.equal(reply.data.running, true); assert.equal(reply.data.results[0].error.code, 'cancelled');
+  assert.match(reply.data.results[0].error.message, /Extension restarted during resolution/);
+  assert.equal(f.queue.calls.closes.includes(interrupted.active.tabId), true); assert.ok(interrupted.active);
+  const resumed = f.saved().active; assert.equal(f.queue.calls.opens.length, 4);
+  await restart.handle(message('RESOLVER_READY', { token: resumed.token }), { ...sender, tab: { id: resumed.tabId }, url: resumed.url });
+  const url = issue('resumed-synthetic').url;
+  f.queue.tabs.set(resumed.tabId, { id: resumed.tabId, url, active: false });
+  await restart.updated(resumed.tabId, url);
+  const done = (await restart.handle(message('GET_RESOLUTION'), sender)).data;
+  assert.equal(done.running, false); assert.equal(done.results[1].added, 1); assert.equal(done.error, null);
+  assert.equal(restart.busy(), false);
 });
 
 test('unverified external/login/wrong-project/missing URL never closes tab and blocks further batches until closed', async () => {
@@ -114,7 +123,10 @@ test('cancel/restart never closes same-app detail that was not verified as resol
   f.queue.tabs.set(id, { id, url: issue('manually-navigated').url, active: false });
   await f.resolver.handle(message('CANCEL_RESOLUTION'), sender);
   assert.equal(f.queue.calls.closes.length, 0); assert.equal(f.resolver.busy(), true);
-  const restarted = createResolver(f.platform, f.queue.controller); await restarted.recover(); assert.equal(restarted.busy(), true); assert.equal(f.queue.calls.closes.length, 0);
+  const restarted = createResolver(f.platform, f.queue.controller); await restarted.recover();
+  assert.equal(f.queue.calls.closes.length, 0); assert.equal(f.queue.tabs.has(id), true);
+  assert.equal(restarted.busy(), false);
+  assert.equal((await restarted.handle(message('GET_RESOLUTION'), sender)).data.error, null);
 });
 
 test('resource/session failures stop safely, failed recovery never overwrites session or opens tab', async () => {
@@ -143,4 +155,73 @@ test('mismatched current URL cannot enqueue or close; queue write failure stays 
   assert.equal((await f.queue.state()).items.length, 0); assert.equal(f.queue.calls.closes.length, 0); assert.equal((await f.get()).data.running, false);
   const g = setup(); await g.start(); await g.ready(); g.queue.faults.write = true; await g.navigate();
   assert.equal((await g.get()).data.results[0].error.code, 'storage-failed');
+});
+
+test('restart during loading fails only the interrupted row, closes the verified temp tab, and resumes the batch', async () => {
+  const f = setup(); await f.start(); const interrupted = f.current();
+  const restart = createResolver(f.platform, f.queue.controller);
+  const reply = await restart.recover();
+  assert.equal(reply.data.running, true);
+  assert.equal(reply.data.results[0].status, 'failed');
+  assert.equal(reply.data.results[0].error.code, 'cancelled');
+  assert.match(reply.data.results[0].error.message, /Extension restarted during resolution/);
+  assert.deepEqual(f.queue.calls.closes, [interrupted.tabId]);
+  assert.equal(f.queue.tabs.has(interrupted.tabId), false);
+  assert.equal(f.queue.calls.opens.length, 2);
+  assert.equal(reply.data.error, null);
+  const resumed = f.current();
+  await restart.handle(message('RESOLVER_READY', { token: resumed.token }), { ...sender, tab: { id: resumed.tabId }, url: resumed.url });
+  const url = issue('resumed-synthetic').url;
+  f.queue.tabs.set(resumed.tabId, { id: resumed.tabId, url, active: false });
+  await restart.updated(resumed.tabId, url);
+  const done = (await restart.handle(message('GET_RESOLUTION'), sender)).data;
+  assert.equal(done.running, false); assert.equal(done.results[1].added, 1); assert.equal(done.results[1].status, 'succeeded');
+  assert.equal(done.error, null); assert.equal(restart.busy(), false);
+});
+
+test('restart after a persisted verified detail URL records the row succeeded and continues', async () => {
+  const f = setup(); await f.start(); await f.ready();
+  const stored = f.saved(); const id = f.current().tabId; const url = issue('restarted-detail').url;
+  stored.active.resolvedUrl = url; stored.active.phase = 'clicked';
+  f.queue.tabs.set(id, { id, url, active: true });
+  const restart = createResolver({ ...f.platform, readSession: async () => stored }, f.queue.controller);
+  const reply = await restart.recover();
+  assert.equal(reply.data.results[0].status, 'succeeded');
+  assert.equal(reply.data.results[0].error, null);
+  assert.deepEqual(f.queue.calls.closes, [id]);
+  assert.equal(f.queue.tabs.has(id), false);
+  assert.equal(reply.data.running, true);
+  assert.equal(reply.data.error, null);
+  assert.equal((await f.queue.state()).items.length, 0);
+  const resumed = f.current();
+  await restart.handle(message('RESOLVER_READY', { token: resumed.token }), { ...sender, tab: { id: resumed.tabId }, url: resumed.url });
+  const detail = issue('after-restart-row').url;
+  f.queue.tabs.set(resumed.tabId, { id: resumed.tabId, url: detail, active: false });
+  await restart.updated(resumed.tabId, detail);
+  const done = (await restart.handle(message('GET_RESOLUTION'), sender)).data;
+  assert.equal(done.running, false); assert.equal(done.results[1].added, 1); assert.equal(restart.busy(), false);
+});
+
+test('restart recovery never raises an intervention error or a permanent lock', async () => {
+  const f = setup(); await f.start(); const focused = f.current().tabId;
+  f.queue.tabs.get(focused).active = true;
+  const restart = createResolver(f.platform, f.queue.controller);
+  const reply = await restart.recover();
+  assert.equal(reply.data.error, null);
+  assert.deepEqual(f.queue.calls.closes, [focused]);
+  await restart.handle(message('CANCEL_RESOLUTION'), sender);
+  assert.equal(restart.busy(), false);
+
+  const g = setup(); await g.start(); const moved = g.current().tabId;
+  g.queue.tabs.set(moved, { id: moved, url: issue('moved-away').url, active: false });
+  const resumed = createResolver(g.platform, g.queue.controller);
+  const second = await resumed.recover();
+  assert.equal(second.data.error, null);
+  assert.deepEqual(g.queue.calls.closes, []);
+  assert.equal(second.data.running, true);
+  assert.equal(g.queue.calls.opens.length, 2);
+  assert.equal(g.queue.tabs.has(moved), true);
+  await resumed.handle(message('CANCEL_RESOLUTION'), sender);
+  assert.equal(resumed.busy(), false);
+  assert.equal(g.queue.tabs.has(moved), true);
 });
