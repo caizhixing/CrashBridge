@@ -22,7 +22,7 @@ Node v24.18.0，零第三方依赖，无下载工具。
 - npm test：129 passed / 0 failed / 0 skipped。
 - npm run test:coverage：domain model/export/protocol、queue、resolver逐文件100%行覆盖；DOM/UI/Chrome glue n/a，行为有实质断言。
 - 实现提交：60c2ddf、58a56f0、1310bf8；当前候选已分别集成，未合并main。
-- PR #11，base integration/v1；round1独立fail两项：prefix等待期间visible→hidden仍可点击、非法active原始值绕过session校验。rework-1已修并新增三时序与非法根/active回归。round2正式独立结论待补。
+- PR #11，base integration/v1；round1独立fail两项：prefix等待期间visible→hidden仍可点击、非法active原始值绕过session校验。rework-1已修并新增三时序与非法根/active回归。round2正式独立结论：PASS（PR #11，独立20个回归场景通过；contract_touched=no，assertion_quality=ok）。
 
 ## 真实 Ego 调试证据与尚未完成项
 
