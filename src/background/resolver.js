@@ -3,6 +3,7 @@ import { pageIdentity, parseIssueUrl } from '../adapter/firebase.js';
 
 const envelope = (type, payload = {}) => ({ namespace: 'crashbridge', version: 1, type, payload });
 const fail = (code, message) => ({ ok: false, error: { code, message } });
+const plainObject = value => value !== null && typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype;
 
 /** Independent session-only resolver; queue schema and IssueRef identity remain unchanged. */
 export function createResolver(platform, controller) {
@@ -90,12 +91,14 @@ export function createResolver(platform, controller) {
     try { state = await platform.readSession(); }
     catch { recoveryError = { code: 'storage-failed', message: 'Cannot read resolution session; reload extension before retrying.' }; return { ok: false, error: recoveryError }; }
     recovered = true;
-    if (state) {
+    if (state !== null) {
       try {
+        if (!plainObject(state)) throw new Error('Invalid session root.');
         const selection = validateSelection(state.selection);
         if (!Array.isArray(state.results) || state.results.length !== selection.selected.length || typeof state.running !== 'boolean' || !Number.isInteger(state.sourceTab) || !('active' in state) || state.results.some((entry, index) => entry.index !== selection.selected[index] || !['pending', 'resolving', 'succeeded', 'failed'].includes(entry.status))) throw new Error('Invalid session.');
         const active = state.active;
-        if (active) {
+        if (active !== null) {
+          if (!plainObject(active)) throw new Error('Invalid active task type.');
           const expected = new URL(selection.listUrl); expected.hash = `crashbridge-resolve=${active.token}`;
           if (!Number.isInteger(active.tabId) || active.tabId === state.sourceTab || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(active.token) || active.url !== expected.href || !selection.selected.includes(active.index) || !['loading', 'clicked'].includes(active.phase) || !Number.isFinite(active.deadline)) throw new Error('Invalid active task.');
           if (active.resolvedUrl && (!parseIssueUrl(active.resolvedUrl) || !sameApp(active.resolvedUrl))) throw new Error('Invalid detail identity.');

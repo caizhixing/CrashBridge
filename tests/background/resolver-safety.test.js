@@ -47,6 +47,22 @@ test('malformed persisted session cannot close source tab, trust arbitrary hash,
   }
 });
 
+test('non-object session roots and non-null primitive/array active values fail closed without I/O', async () => {
+  const f = await setup(); const valid = f.saved();
+  const invalid = [false, 0, '', 1, 'synthetic', [], ['synthetic'], ...[false, 0, '', [], true, 'synthetic', undefined].map(active => ({ ...structuredClone(valid), active }))];
+  for (const stored of invalid) {
+    const calls = { writes: 0, closes: 0, opens: 0 };
+    const resolver = createResolver({
+      ...f.platform, readSession: async () => stored,
+      writeSession: async () => { calls.writes++; }, close: async () => { calls.closes++; }, open: async () => { calls.opens++; return 999; },
+    }, f.queue.controller);
+    const reply = await resolver.recover();
+    assert.equal(reply.ok, false); assert.equal(reply.error.code, 'storage-failed'); assert.equal(resolver.busy(), true);
+    assert.equal((await resolver.handle(message('RESOLVE_SELECTION', selection), sender)).ok, false);
+    assert.deepEqual(calls, { writes: 0, closes: 0, opens: 0 });
+  }
+});
+
 test('activation is sticky before/after detail event, missing active is fail-closed, stale messages cannot close takeover', async () => {
   for (const order of ['activate-first', 'update-first', 'no-event-active', 'missing-active']) {
     const f = await setup(); await f.ready();

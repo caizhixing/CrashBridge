@@ -14,6 +14,41 @@ function appendRow(document, title) {
   return { row, anchor };
 }
 
+for (const stage of ['before-instruction', 'prefix-wait', 'before-click-microtask']) {
+  test(`resolver visibility takeover stays invalid after hiding again: ${stage}`, async () => {
+    const token = '00000000-0000-4000-8000-000000000001'; const url = `${URL_BASE}#crashbridge-resolve=${token}`;
+    const document = makeDocument(url); document.visibilityState = 'hidden';
+    const first = appendRow(document, 'Synthetic A'); const second = appendRow(document, 'Synthetic B');
+    const snapshot = readList(document, url).map(entry => entry.descriptor);
+    if (stage === 'prefix-wait') second.row.remove();
+    const environment = browserEnvironment(document); environment.runtime.id = 'synthetic-extension';
+    let instruction;
+    environment.runtime.onMessage = { addListener: value => { instruction = value; }, removeListener() {} };
+    let clicks = 0; first.anchor.addEventListener('click', () => { clicks++; });
+    const app = mountContent(environment); const replies = [];
+    const message = { namespace: 'crashbridge', version: 1, type: 'RESOLVE_ROW', payload: { token, snapshot, index: 0 } };
+    const takeover = () => {
+      document.visibilityState = 'visible'; document.dispatchEvent({ type: 'visibilitychange' });
+      document.visibilityState = 'hidden'; document.dispatchEvent({ type: 'visibilitychange' });
+    };
+    if (stage === 'before-instruction') takeover();
+    instruction(message, { id: environment.runtime.id }, value => replies.push(value));
+    const queued = [...environment.timers.values()].map(timer => timer.callback);
+    if (stage !== 'before-instruction') takeover();
+    if (stage === 'prefix-wait') {
+      assert.equal(environment.timers.size, 0, 'activation cancels prefix timers');
+      assert.deepEqual(replies, [{ ok: false }], 'pending instruction is rejected immediately');
+      document.body.append(second.row);
+      for (const callback of queued) callback(); // A stale callback cannot resurrect it.
+    }
+    await flush(); assert.equal(clicks, 0);
+    assert.equal(replies.length, 1, 'one response per instruction');
+    const retried = []; instruction(message, { id: environment.runtime.id }, value => retried.push(value));
+    await flush(); assert.deepEqual(retried, [{ ok: false }]); assert.equal(clicks, 0);
+    app.dispose(); assert.equal(document.listeners.has('visibilitychange'), false);
+  });
+}
+
 test('temporary prefix rendering waits at most three seconds for full ordered snapshot before click', async () => {
   const token = '00000000-0000-4000-8000-000000000001'; const url = `${URL_BASE}#crashbridge-resolve=${token}`;
   const document = makeDocument(url); const first = appendRow(document, 'Synthetic A'); const second = appendRow(document, 'Synthetic B');
