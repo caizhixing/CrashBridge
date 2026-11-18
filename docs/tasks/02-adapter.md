@@ -11,7 +11,7 @@
 - [ ] discover.test.js：列表多条链接跨页可加入，复合 key 去重；显示 namespaced 勾选控件和加入清单按钮，刷新/SPA 不重复挂载，不拦截 Firebase 本身操作。用最小 fake document 作浏览器边界替身。
 - [ ] capture.test.js：身份匹配、堆栈/因果链提取、版本/设备/统计缺失为 null，当前事件未知完整性标记 unknown/partial；200000 字符截断有 warning；无堆栈不成功。
 - [ ] capture.test.js：登录失效、布局不支持和身份不匹配明确失败，不将整页文本当日志；不依赖自造 data-crashbridge fixture 标记作为唯一支持路径，采用窄范围语义/可配置选择器，并明确真实控制台未验证。
-- [ ] content.test.js：job hash 与 URL 校验、等待 DOM（最多 60s，由调度兜底）、一次提交结果，失败可见；不读取 Cookie/调用私有 API/点击状态按钮。MutationObserver 生命周期合理，无无限轮询。
+- [ ] content.test.js：job query（兼容旧 hash）与 URL 校验、等待 DOM（最多 60s，由调度兜底）、一次提交结果，失败可见；不读取 Cookie/调用私有 API/点击状态按钮。MutationObserver 生命周期合理，无无限轮询。
 
 ## Out-of-scope
 

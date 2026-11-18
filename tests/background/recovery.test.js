@@ -6,7 +6,7 @@ const item = () => ({ key: key(issue()), issue: issue(), status: 'collecting', c
 const interrupted = () => ({
   schemaVersion: 1, items: [item()], running: true, lastError: null,
   active: { key: key(issue()), tabId: 100, jobId: 'synthetic-job',
-    url: `${issue().url}#crashbridge-job=synthetic-job`, deadline: '2026-11-16T00:01:00.000Z' },
+    url: `${issue().url}?crashbridge-job=synthetic-job`, deadline: '2026-11-16T00:01:00.000Z' },
 });
 
 test('recovery cancels interrupted jobs once and cleans only a verified owned tab', async () => {
@@ -27,7 +27,16 @@ test('recovery cancels interrupted jobs once and cleans only a verified owned ta
   assert.equal((await f.controller.handle(message('TIMEOUT', { jobId: 'synthetic-job' }))).ok, false);
 });
 
-test('recovery never closes reused IDs, navigated tabs, missing job hashes or forged stored URLs', async () => {
+test('recovery still closes an exact legacy capture hash URL', async () => {
+  const stored = interrupted();
+  stored.active.url = stored.active.url.replace('?', '#');
+  const f = fixture(stored);
+  f.tabs.set(100, { id: 100, url: stored.active.url });
+  assert.equal((await f.controller.recover()).ok, true);
+  assert.deepEqual(f.calls.closes, [100]);
+});
+
+test('recovery never closes reused IDs, navigated tabs, missing job tokens or forged stored URLs', async () => {
   for (const tab of [null, { id: 101, url: interrupted().active.url },
     { id: 100, url: issue().url }, { id: 100, url: 'https://example.invalid/user-page' }]) {
     const f = fixture(interrupted());

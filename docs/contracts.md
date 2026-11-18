@@ -18,7 +18,7 @@
 
 - `src/adapter/firebase.js`：`parseIssueUrl(url)` 返回 IssueRef（title:null）或 null；`discoverIssues(document,url)` 返回 IssueRef[]；`extractCapture(document,issue,now)` 返回 Capture，无堆栈/布局不支持时抛带 code 的 Error；必须验证页面身份匹配。支持合成的真实风格路由 `/project/<project>/crashlytics/app/android:<package>/issues/<issue>` 及可选 query eventId；额外明确支持的路由要有测试，不泛化猜尾段。
 - `src/content/main.js`：经典入口，dynamic import(chrome.runtime.getURL('src/content/app.js'))。
-- `src/content/app.js`：列表勾选控件和加入队列按钮，MutationObserver 处理 SPA；有 job hash `#crashbridge-job=<uuid>` 时等待可用详情 DOM 并发 CAPTURE_RESULT，捕获 URL 使用现存真实问题路径而非拼造接口。不得点击 Firebase 状态按钮。独立注入 UI 放 Shadow DOM；Firebase 原节点标记应使用 namespaced 属性。
+- `src/content/app.js`：列表勾选控件和加入队列按钮，MutationObserver 处理 SPA；优先使用 query `crashbridge-job=<uuid>`（兼容 legacy hash `#crashbridge-job=<uuid>`）等待可用详情 DOM 并发 CAPTURE_RESULT，捕获 URL 使用现存真实问题路径而非拼造接口。Firebase SPA 可清除 hash，不能因此丢失任务身份。不得点击 Firebase 状态按钮。独立注入 UI 放 Shadow DOM；Firebase 原节点标记应使用 namespaced 属性。
 - `tests/adapter/*.test.js` 与合成 fixtures，无第三方 DOM 库；可用最小 fake document 接口作边界替身，不 mock 被测解析函数。
 
 ### Issue 3：background
