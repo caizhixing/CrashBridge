@@ -8,9 +8,18 @@ const fail = (code, message) => ({ ok: false, error: { code, message } });
 export function createResolver(platform, controller) {
   let state = null;
   let recoveryError = null;
+  // Browser activation is recorded synchronously, before the serialized event tail.
+  const intervened = new Set();
+  let recovered = false;
+  let opening = false;
+  const takeover = active => Boolean(active?.intervened || intervened.has(active?.tabId));
+  const interventionError = () => ({ code: 'unsupported', message: 'Temporary resolution tab was activated or taken over; no further navigation result is accepted. Close that tab and select again.' });
   const send = (tabId, message) => new Promise((resolve, reject) => {
     const timer = (platform.setTimeout ?? globalThis.setTimeout)(() => reject(new Error('Content response timeout.')), 5000);
-    Promise.resolve().then(() => platform.send(tabId, message)).then(resolve, reject).finally(() => (platform.clearTimeout ?? globalThis.clearTimeout)(timer));
+    Promise.resolve().then(() => {
+      if (message.type === 'RESOLVE_ROW' && takeover(state?.active)) throw new Error('Resolution tab was activated.');
+      return platform.send(tabId, message);
+    }).then(resolve, reject).finally(() => (platform.clearTimeout ?? globalThis.clearTimeout)(timer));
   });
   let tail = Promise.resolve();
   const serial = operation => { const result = tail.then(operation); tail = result.catch(() => {}); return result; };
@@ -32,6 +41,9 @@ export function createResolver(platform, controller) {
       if (!closed) {
         const tab = await platform.getTab(active.tabId);
         if (tab) {
+          if (takeover(active) || tab.active !== false) {
+            active.intervened = true; state.running = false; state.error = interventionError(); return false;
+          }
           const safeList = tab.url === active.url;
           const safeDetail = typeof active.resolvedUrl === 'string' && tab.url === active.resolvedUrl;
           if (tab.id !== active.tabId || (!safeList && !safeDetail)) throw new Error('unverified');
@@ -53,7 +65,9 @@ export function createResolver(platform, controller) {
     const token = platform.uuid();
     const url = new URL(state.selection.listUrl); url.hash = `crashbridge-resolve=${token}`;
     try {
-      const tabId = await platform.open(url.href);
+      opening = true;
+      let tabId;
+      try { tabId = await platform.open(url.href); } finally { opening = false; }
       if (!Number.isInteger(tabId)) throw new Error('missing id');
       state.active = { tabId, token, url: url.href, index: entry.index, phase: 'loading', deadline: platform.now() + 60000 };
       entry.status = 'resolving';
@@ -67,7 +81,7 @@ export function createResolver(platform, controller) {
   }
   async function finish(error, closed = false) {
     const entry = state.results.find(entry => entry.index === state.active.index);
-    if (error) { entry.status = 'failed'; entry.error = error; }
+    if (error && entry.status !== 'succeeded') { entry.status = 'failed'; entry.error = error; }
     if (!await cleanup(closed)) { await save(); return result(); }
     if (await save()) await next();
     return result();
@@ -75,14 +89,29 @@ export function createResolver(platform, controller) {
   async function recover() {
     try { state = await platform.readSession(); }
     catch { recoveryError = { code: 'storage-failed', message: 'Cannot read resolution session; reload extension before retrying.' }; return { ok: false, error: recoveryError }; }
-    if (state && (!state.selection || !Array.isArray(state.results) || typeof state.running !== 'boolean' || !Number.isInteger(state.sourceTab) || !('active' in state))) {
-      recoveryError = { code: 'storage-failed', message: 'Unknown resolution session; original session was not overwritten.' };
-      return { ok: false, error: recoveryError };
+    recovered = true;
+    if (state) {
+      try {
+        const selection = validateSelection(state.selection);
+        if (!Array.isArray(state.results) || state.results.length !== selection.selected.length || typeof state.running !== 'boolean' || !Number.isInteger(state.sourceTab) || !('active' in state) || state.results.some((entry, index) => entry.index !== selection.selected[index] || !['pending', 'resolving', 'succeeded', 'failed'].includes(entry.status))) throw new Error('Invalid session.');
+        const active = state.active;
+        if (active) {
+          const expected = new URL(selection.listUrl); expected.hash = `crashbridge-resolve=${active.token}`;
+          if (!Number.isInteger(active.tabId) || active.tabId === state.sourceTab || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(active.token) || active.url !== expected.href || !selection.selected.includes(active.index) || !['loading', 'clicked'].includes(active.phase) || !Number.isFinite(active.deadline)) throw new Error('Invalid active task.');
+          if (active.resolvedUrl && (!parseIssueUrl(active.resolvedUrl) || !sameApp(active.resolvedUrl))) throw new Error('Invalid detail identity.');
+        }
+      } catch {
+        recoveryError = { code: 'storage-failed', message: 'Unknown resolution session; original session was not overwritten.' };
+        return { ok: false, error: recoveryError };
+      }
     }
     if (state?.running || state?.active) {
       state.running = false;
       state.error = { code: 'cancelled', message: 'Resolution interrupted by extension restart; select again to retry.' };
       for (const entry of state.results) if (['pending', 'resolving'].includes(entry.status)) { entry.status = 'failed'; entry.error = state.error; }
+      // A persisted detail URL cannot re-establish click ownership after restart.
+      // Only the rebuilt token-bearing list URL remains independently verifiable.
+      if (state.active) delete state.active.resolvedUrl;
       await cleanup(); await save();
     }
     return result();
@@ -90,7 +119,7 @@ export function createResolver(platform, controller) {
   async function handle(message, sender) {
     try {
       if (recoveryError) return { ok: false, error: recoveryError };
-      if (message?.namespace !== 'crashbridge' || message.version !== 1) throw new Error('Invalid resolver protocol.');
+      if (message?.namespace !== 'crashbridge' || message.version !== 1 || !message.payload || typeof message.payload !== 'object' || Array.isArray(message.payload) || new TextEncoder().encode(JSON.stringify(message)).length > 262144) throw new Error('Invalid resolver protocol or payload.');
       if (!own(sender) || !listUrl(sender.url) && !parseIssueUrl(sender.url)) throw new Error('Invalid resolver sender/frame.');
       if (message.type === 'RESOLVE_SELECTION') {
         if (state?.running || state?.active) throw new Error('Resolution already active; inspect or cancel before retrying.');
@@ -117,9 +146,11 @@ export function createResolver(platform, controller) {
         const active = state?.active;
         if (!active || !state.running || sender.tab.id !== active.tabId || sender.url !== active.url || message.payload?.token !== active.token || Object.keys(message.payload).length !== 1) throw new Error('Resolution tab/token mismatch.');
         if (active.phase !== 'loading') return result();
-        const tab = await platform.getTab(active.tabId);
-        if (tab?.url !== active.url) throw new Error('Resolution tab URL mismatch.');
-        const original = await platform.getTab(state.sourceTab);
+        let tab;
+        let original;
+        try { tab = await platform.getTab(active.tabId); original = await platform.getTab(state.sourceTab); }
+        catch { state.running = false; state.error = { code: 'unsupported', message: 'Cannot query resolution/source tab; batch stopped.' }; return finish(state.error); }
+        if (tab?.url !== active.url || tab?.active !== false || takeover(active)) { active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
         if (original?.url !== state.selection.listUrl) return finish({ code: 'unsupported', message: 'Original list route changed; select again.' });
         try {
           const checked = await send(state.sourceTab, envelope('CHECK_SELECTION', { snapshot: state.selection.snapshot, index: active.index }));
@@ -128,6 +159,10 @@ export function createResolver(platform, controller) {
         active.phase = 'clicked';
         if (!await save()) { await cleanup(); return result(); }
         try {
+          const beforeClick = await platform.getTab(active.tabId);
+          if (takeover(active) || beforeClick?.active !== false || beforeClick?.url !== active.url) {
+            active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result();
+          }
           const reply = await send(active.tabId, envelope('RESOLVE_ROW', { token: active.token, snapshot: state.selection.snapshot, index: active.index }));
           if (!reply?.ok) return finish({ code: 'unsupported', message: 'List snapshot changed, ambiguous, or unsupported; refresh and select again.' });
         } catch { return finish({ code: 'unsupported', message: 'Resolution content unavailable; reload the extension and refresh Firebase.' }); }
@@ -146,9 +181,19 @@ export function createResolver(platform, controller) {
     if (!sameApp(url)) return finish({ code: 'unsupported', message: 'Resolved project/app does not match the source list.' });
     try {
       const tab = await platform.getTab(tabId);
+      if (tab?.active !== false || takeover(state.active)) {
+        state.active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result();
+      }
       if (tab?.url !== url || tab.id !== tabId) throw new Error('unverified');
       state.active.resolvedUrl = url;
       if (!await save()) { await cleanup(); return result(); }
+      const original = await platform.getTab(state.sourceTab);
+      if (original?.url !== state.selection.listUrl) return finish({ code: 'unsupported', message: 'Original list changed before resolution completed.' });
+      try {
+        const checked = await send(state.sourceTab, envelope('CHECK_SELECTION', { snapshot: state.selection.snapshot, index: state.active.index }));
+        if (!checked?.ok) return finish({ code: 'unsupported', message: 'Original list snapshot changed before resolution completed.' });
+      } catch { return finish({ code: 'unsupported', message: 'Original list content unavailable before saving resolution.' }); }
+      if (takeover(state.active)) { state.active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
       const response = await controller.handle(envelope('ADD_ISSUES', { issues: [issue] }), { id: manager.id, frameId: 0, tab: { id: tabId }, url });
       const entry = state.results.find(entry => entry.index === state.active.index);
       if (!response.ok) {
@@ -163,6 +208,19 @@ export function createResolver(platform, controller) {
     }
   }
   return {
+    activated: tabId => {
+      if (!recovered || opening || state?.active?.tabId === tabId) intervened.add(tabId);
+      return serial(async () => {
+        if (!recovered) return result();
+        if (state?.active?.tabId === tabId) {
+          state.active.intervened = true; state.running = false; state.error = interventionError();
+          const entry = state.results.find(entry => entry.index === state.active.index);
+          if (entry.status !== 'succeeded') { entry.status = 'failed'; entry.error = state.error; }
+          await save();
+        }
+        return result();
+      });
+    },
     recover: () => serial(recover),
     handle: (message, sender) => serial(() => handle(message, sender)),
     updated: (tabId, url) => serial(() => updated(tabId, url)),

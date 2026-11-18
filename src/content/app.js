@@ -48,8 +48,11 @@ export function mountContent(environment = {}) {
   /** @type {Map<Element,{host:Element,input:HTMLInputElement,issue:object}>} */
   const controls = new Map();
   let busy = false;
+  let canCancel = false;
   let pollTimer = null;
   let readySent = false;
+  let resumeRequested = false;
+  let selectedSnapshot = null;
   const resolveToken = RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] ?? null;
   const completed = new Set();
   const initialJob = parseCaptureJob(window.location.href);
@@ -144,7 +147,14 @@ export function mountContent(environment = {}) {
       candidates.set(row, entry);
     }
     try {
-      for (const entry of readList(document, window.location.href)) {
+      const observed = readList(document, window.location.href);
+      if (observed.length && !resumeRequested && runtime.id) {
+        resumeRequested = true;
+        void send('GET_RESOLUTION').then(response => {
+          if (!disposed && response?.ok && (response.data.running || response.data.results?.length || response.data.error)) void pollResolution();
+        }).catch(() => { if (!disposed) status.textContent = '扩展连接已失效，请重新加载扩展并刷新 Firebase。'; });
+      }
+      for (const entry of observed) {
         const key = JSON.stringify(entry.descriptor);
         if (entry.descriptor.href === '#') candidates.set(entry.row, new Map([[key, { descriptor: entry.descriptor, key }]]));
       }
@@ -168,7 +178,13 @@ export function mountContent(environment = {}) {
       const input = document.createElement('input');
       input.type = 'checkbox';
       input.setAttribute('aria-label', '选择 CrashBridge 问题（独立于 Firebase）');
-      input.addEventListener('change', updateCount);
+      input.addEventListener('change', () => {
+        if (input.checked && issue.descriptor && selectedSnapshot === null) {
+          try { selectedSnapshot = JSON.stringify(readList(document, window.location.href).map(entry => entry.descriptor)); }
+          catch { input.checked = false; status.textContent = '列表已变动，请刷新后重新选择。'; }
+        }
+        updateCount();
+      });
       label.append(input, document.createTextNode(' CrashBridge'));
       root.append(label);
       row.setAttribute('data-crashbridge-selection', 'v1');
@@ -182,10 +198,11 @@ export function mountContent(environment = {}) {
 
   function updateCount() {
     const selected = [...controls.values()].filter(control => control.input.checked).length;
+    if (!selected) selectedSnapshot = null;
     count.textContent = '已选 ' + selected + ' 条（CrashBridge 独立勾选）' + (selected ? '' : '；请先勾选 CrashBridge');
     add.disabled = busy || selected === 0;
     for (const control of controls.values()) control.input.disabled = busy;
-    cancel.hidden = !busy;
+    cancel.hidden = !busy && !canCancel;
   }
   const send = (type, payload = {}) => runtime.sendMessage({ namespace: 'crashbridge', version: 1, type, payload });
   async function pollResolution() {
@@ -194,6 +211,7 @@ export function mountContent(environment = {}) {
       if (!response?.ok) throw new Error('连接失效');
       const data = response.data;
       busy = data.running;
+      canCancel = data.running || Boolean(data.error);
       const success = data.results.filter(entry => entry.status === 'succeeded');
       const added = success.reduce((sum, entry) => sum + (entry.added ?? 0), 0);
       const duplicates = success.reduce((sum, entry) => sum + (entry.duplicates ?? 0), 0);
@@ -218,6 +236,11 @@ export function mountContent(environment = {}) {
       const unresolved = selected.filter(control => control.issue.descriptor);
       if (unresolved.length) {
         const rows = readList(document, window.location.href);
+        const currentSnapshot = JSON.stringify(rows.map(row => row.descriptor));
+        if ((selectedSnapshot !== null && selectedSnapshot !== currentSnapshot) || unresolved.some(control => {
+          const current = rows.find(entry => entry.row === [...controls].find(([, value]) => value === control)?.[0]);
+          return !current || JSON.stringify(current.descriptor) !== JSON.stringify(control.issue.descriptor);
+        })) throw new Error('列表已变化，请重新选择；未解析旧选择');
         const response = await send('RESOLVE_SELECTION', { listUrl: listUrl(window.location.href), snapshot: rows.map(row => row.descriptor), selected: unresolved.map(control => rows.findIndex(row => row.row === [...controls].find(([, value]) => value === control)?.[0])) });
         if (!response?.ok) throw new Error(response?.error?.message ?? 'unsupported');
         await pollResolution();
@@ -237,7 +260,7 @@ export function mountContent(environment = {}) {
     const attempt = () => {
       try {
         if (disposed) throw new Error('Disposed content.');
-        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] !== resolveToken)) throw new Error('Unowned resolver document.');
+        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] !== resolveToken || document.visibilityState === 'visible')) throw new Error('Unowned or user-visible resolver document.');
         // Fresh SPA lists can render a prefix first. Wait at most 3 seconds for all
         // expected rows; equal-length edits/reorder/ambiguity fail immediately.
         if (message.type === 'RESOLVE_ROW' && attempts++ < 12 && readList(document, window.location.href).length < message.payload.snapshot.length) {
@@ -246,7 +269,12 @@ export function mountContent(environment = {}) {
         }
         const anchor = matchRow(document, window.location.href, message.payload);
         reply({ ok: true });
-        if (message.type === 'RESOLVE_ROW') queueMicrotask(() => anchor.click());
+        if (message.type === 'RESOLVE_ROW') queueMicrotask(() => {
+          if (document.visibilityState !== 'visible' && !disposed && RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] === resolveToken) {
+            try { if (matchRow(document, window.location.href, message.payload) === anchor) anchor.click(); }
+            catch { /* The background deadline reports a changed page without clicking. */ }
+          }
+        });
       } catch { reply({ ok: false }); }
     };
     attempt();

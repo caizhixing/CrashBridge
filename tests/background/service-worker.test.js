@@ -14,14 +14,17 @@ const event = () => {
   const alarms = [];
   const cleared = [];
   let stored = null;
+  let session = null;
+  const instructions = [];
   let next = 100;
   const chrome = {
-    storage: { session: { get: async () => ({}), set: async () => {} }, local: {
+    storage: { session: { get: async key => ({ [key]: session }), set: async value => { session = structuredClone(value['crashbridge-resolution']); } }, local: {
       get: async (key) => ({ [key]: stored }),
       set: async (value) => { stored = structuredClone(value.crashbridge); },
     } },
     tabs: {
-      onRemoved: event(), onUpdated: event(),
+      onRemoved: event(), onUpdated: event(), onActivated: event(),
+      sendMessage: async (id, message, options) => { instructions.push({ id, message, options }); return { ok: true }; },
       create: async (options) => { const tab = { id: next++, ...options }; tabs.set(tab.id, tab); created.push(tab); return tab; },
       get: async (id) => { if (!tabs.has(id)) throw new Error(`No tab with id: ${id}`); return tabs.get(id); },
       remove: async (id) => { tabs.delete(id); removed.push(id); },
@@ -77,6 +80,25 @@ const event = () => {
     assert.equal((await send('CANCEL_CAPTURE')).ok, true);
     assert.equal((await send('GET_STATE')).data.active, null);
     assert.equal(tabs.has(created[0].id), true, 'manager/user tab must remain untouched');
+    const listSender = { ...source(), frameId: 0 };
+    tabs.set(7, { id: 7, url: listSender.url });
+    const selection = { listUrl: listSender.url, snapshot: [{ title: 'Synthetic caption', subtitle: 'Synthetic subcaption', href: '#', cells: 2 }], selected: [0] };
+    assert.equal((await send('RESOLVE_SELECTION', selection, listSender)).ok, true);
+    assert.equal((await send('START_CAPTURE')).ok, false, 'resolver and capture share one atomic dispatcher');
+    const resolverActive = session.active;
+    assert.equal((await send('RESOLVER_READY', { token: resolverActive.token }, { ...listSender, tab: { id: resolverActive.tabId }, url: resolverActive.url })).ok, true);
+    assert.deepEqual(instructions.map(entry => entry.options), [{ frameId: 0 }, { frameId: 0 }]);
+    const resolvedUrl = issue('resolved-synthetic').url;
+    tabs.set(resolverActive.tabId, { id: resolverActive.tabId, url: resolvedUrl, active: false });
+    chrome.tabs.onUpdated.emit(resolverActive.tabId, { url: resolvedUrl });
+    const resolution = await send('GET_RESOLUTION', {}, listSender);
+    assert.equal(resolution.data.running, false); assert.equal(resolution.data.results[0].added, 1);
+    assert.equal((await send('GET_STATE')).data.items.some(item => item.issue.issueId === 'resolved-synthetic'), true);
+    assert.equal((await send('OPEN_MANAGER', {}, { ...listSender, frameId: 1 })).ok, false);
+    assert.equal((await send('OPEN_MANAGER', {}, listSender)).ok, true);
+    assert.equal((await send('START_CAPTURE')).ok, true);
+    assert.equal((await send('RESOLVE_SELECTION', selection, listSender)).ok, false);
+    assert.equal((await send('CANCEL_CAPTURE')).ok, true);
   } finally {
     globalThis.chrome = previous;
   }

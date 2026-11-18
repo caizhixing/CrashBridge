@@ -20,6 +20,8 @@ function setup(stored = null) {
     setTimeout: callback => { const id = timers.size + 1; timers.set(id, callback); return id; },
     clearTimeout: id => timers.delete(id),
   };
+  const open = platform.open;
+  platform.open = async url => { const id = await open(url); queue.tabs.get(id).active = false; return id; };
   const resolver = createResolver(platform, queue.controller);
   const current = () => saved?.active;
   return {
@@ -29,7 +31,7 @@ function setup(stored = null) {
     ready: () => resolver.handle(message('RESOLVER_READY', { token: current().token }), { ...sender, tab: { id: current().tabId }, url: current().url }),
     get: () => resolver.handle(message('GET_RESOLUTION'), sender),
     advance: () => { clock = 60001; },
-    navigate: async (url = issue('real-synthetic').url) => { const id = current().tabId; queue.tabs.set(id, { id, url }); return resolver.updated(id, url); },
+    navigate: async (url = issue('real-synthetic').url) => { const id = current().tabId; queue.tabs.set(id, { id, url, active: false }); return resolver.updated(id, url); },
   };
 }
 const drain = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
@@ -99,7 +101,7 @@ test('timeout/closed/restart cancel pending state and reject stale events withou
 test('unverified external/login/wrong-project/missing URL never closes tab and blocks further batches until closed', async () => {
   for (const url of ['https://evil.test/', 'https://accounts.google.com/signin', issue('foreign', 'other-project').url, undefined]) {
     const f = setup(); await f.start(); await f.ready(); const id = f.current().tabId;
-    f.queue.tabs.set(id, { id, url });
+    f.queue.tabs.set(id, { id, url, active: false });
     if (url) await f.resolver.updated(id, url); else { f.advance(); await f.resolver.timeout(f.current().token); }
     assert.equal(f.queue.calls.closes.length, 0); assert.equal(f.queue.calls.opens.length, 1); assert.equal(f.resolver.busy(), true);
     assert.equal((await f.start()).ok, false); assert.equal((await f.get()).data.error.code, 'unsupported');
@@ -109,7 +111,7 @@ test('unverified external/login/wrong-project/missing URL never closes tab and b
 
 test('cancel/restart never closes same-app detail that was not verified as resolution result', async () => {
   const f = setup(); await f.start(); await f.ready(); const id = f.current().tabId;
-  f.queue.tabs.set(id, { id, url: issue('manually-navigated').url });
+  f.queue.tabs.set(id, { id, url: issue('manually-navigated').url, active: false });
   await f.resolver.handle(message('CANCEL_RESOLUTION'), sender);
   assert.equal(f.queue.calls.closes.length, 0); assert.equal(f.resolver.busy(), true);
   const restarted = createResolver(f.platform, f.queue.controller); await restarted.recover(); assert.equal(restarted.busy(), true); assert.equal(f.queue.calls.closes.length, 0);
@@ -137,7 +139,7 @@ test('resource/session failures stop safely, failed recovery never overwrites se
 
 test('mismatched current URL cannot enqueue or close; queue write failure stays visible', async () => {
   const f = setup(); await f.start(); await f.ready(); const id = f.current().tabId;
-  f.queue.tabs.set(id, { id, url: issue('other-manual').url }); await f.resolver.updated(id, issue('reported').url);
+  f.queue.tabs.set(id, { id, url: issue('other-manual').url, active: false }); await f.resolver.updated(id, issue('reported').url);
   assert.equal((await f.queue.state()).items.length, 0); assert.equal(f.queue.calls.closes.length, 0); assert.equal((await f.get()).data.running, false);
   const g = setup(); await g.start(); await g.ready(); g.queue.faults.write = true; await g.navigate();
   assert.equal((await g.get()).data.results[0].error.code, 'storage-failed');
