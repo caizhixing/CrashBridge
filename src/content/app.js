@@ -279,7 +279,9 @@ export function mountContent(environment = {}) {
     const attempt = () => {
       try {
         if (disposed) throw new Error('Disposed content.');
-        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] !== resolveToken || resolverIntervened || document.visibilityState === 'visible')) throw new Error('Unowned or user-visible resolver document.');
+        // Firebase SPA strips the resolve hash after load; the token captured at
+        // mount time in this closure is the authority, not the mutable URL hash.
+        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || resolverIntervened || document.visibilityState === 'visible')) throw new Error('Unowned or user-visible resolver document.');
         // Fresh SPA lists can render a prefix first. Wait at most 3 seconds for all
         // expected rows; equal-length edits/reorder/ambiguity fail immediately.
         if (message.type === 'RESOLVE_ROW' && attempts++ < 12 && readList(document, window.location.href).length < message.payload.snapshot.length) {
@@ -289,7 +291,7 @@ export function mountContent(environment = {}) {
         const anchor = matchRow(document, window.location.href, message.payload);
         respond({ ok: true });
         if (message.type === 'RESOLVE_ROW') queueMicrotask(() => {
-          if (!resolverIntervened && document.visibilityState !== 'visible' && !disposed && RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] === resolveToken) {
+          if (!resolverIntervened && document.visibilityState !== 'visible' && !disposed) {
             try { if (matchRow(document, window.location.href, message.payload) === anchor) anchor.click(); }
             catch { /* The background deadline reports a changed page without clicking. */ }
           }

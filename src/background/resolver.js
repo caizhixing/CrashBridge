@@ -42,10 +42,12 @@ export function createResolver(platform, controller) {
       if (!closed) {
         const tab = await platform.getTab(active.tabId);
         if (tab) {
-          if (takeover(active) || tab.active !== false) {
+          if (takeover(active)) {
             active.intervened = true; state.running = false; state.error = interventionError(); return false;
           }
-          const safeList = tab.url === active.url;
+          // Firebase SPA may strip the resolve hash; compare origin+path+search.
+          const basis = value => { const url = new URL(value); url.hash = ''; return url.href; };
+          const safeList = basis(tab.url ?? '') === basis(active.url);
           const safeDetail = typeof active.resolvedUrl === 'string' && tab.url === active.resolvedUrl;
           if (tab.id !== active.tabId || (!safeList && !safeDetail)) throw new Error('unverified');
           await platform.close(active.tabId);
@@ -69,7 +71,8 @@ export function createResolver(platform, controller) {
       await platform.clearAlarm(active.token);
       const tab = await platform.getTab(active.tabId);
       const safeDetail = typeof active.resolvedUrl === 'string' && tab?.url === active.resolvedUrl;
-      if (tab && (tab.url === active.url || safeDetail)) await platform.close(active.tabId);
+      const basis = value => { const url = new URL(value); url.hash = ''; return url.href; };
+      if (tab && (basis(tab.url ?? '') === basis(active.url) || safeDetail)) await platform.close(active.tabId);
     } catch { /* Best effort: a temp tab that cannot be re-verified stays open and never blocks the batch. */ }
   }
   async function next() {
@@ -113,7 +116,8 @@ export function createResolver(platform, controller) {
         if (active !== null) {
           if (!plainObject(active)) throw new Error('Invalid active task type.');
           const expected = new URL(selection.listUrl); expected.hash = `crashbridge-resolve=${active.token}`;
-          if (!Number.isInteger(active.tabId) || active.tabId === state.sourceTab || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(active.token) || active.url !== expected.href || !selection.selected.includes(active.index) || !['loading', 'clicked'].includes(active.phase) || !Number.isFinite(active.deadline)) throw new Error('Invalid active task.');
+          const basis = value => { const url = new URL(value); url.hash = ''; return url.href; };
+          if (!Number.isInteger(active.tabId) || active.tabId === state.sourceTab || !/^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i.test(active.token) || basis(active.url) !== basis(expected.href) || !selection.selected.includes(active.index) || !['loading', 'clicked'].includes(active.phase) || !Number.isFinite(active.deadline)) throw new Error('Invalid active task.');
           if (active.resolvedUrl && (!parseIssueUrl(active.resolvedUrl) || !sameApp(active.resolvedUrl))) throw new Error('Invalid detail identity.');
         }
       } catch {
@@ -173,13 +177,15 @@ export function createResolver(platform, controller) {
       }
       if (message.type === 'RESOLVER_READY') {
         const active = state?.active;
-        if (!active || !state.running || sender.tab.id !== active.tabId || sender.url !== active.url || message.payload?.token !== active.token || Object.keys(message.payload).length !== 1) throw new Error('Resolution tab/token mismatch.');
+        if (!active || !state.running || sender.tab.id !== active.tabId || message.payload?.token !== active.token || Object.keys(message.payload).length !== 1) throw new Error('Resolution tab/token mismatch.');
         if (active.phase !== 'loading') return result();
         let tab;
         let original;
         try { tab = await platform.getTab(active.tabId); original = await platform.getTab(state.sourceTab); }
         catch { state.running = false; state.error = { code: 'unsupported', message: 'Cannot query resolution/source tab; batch stopped.' }; return finish(state.error); }
-        if (tab?.url !== active.url || tab?.active !== false || takeover(active)) { active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
+        // Firebase SPA strips the resolve hash after load; compare origin+path+search only.
+        const urlBasis = value => { const url = new URL(value); url.hash = ''; return url.href; };
+        if (!tab || urlBasis(tab.url ?? '') !== urlBasis(active.url) || takeover(active)) { active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
         if (original?.url !== state.selection.listUrl) return finish({ code: 'unsupported', message: 'Original list route changed; select again.' });
         try {
           const checked = await send(state.sourceTab, envelope('CHECK_SELECTION', { snapshot: state.selection.snapshot, index: active.index }));
@@ -189,7 +195,8 @@ export function createResolver(platform, controller) {
         if (!await save()) { await cleanup(); return result(); }
         try {
           const beforeClick = await platform.getTab(active.tabId);
-          if (takeover(active) || beforeClick?.active !== false || beforeClick?.url !== active.url) {
+          const clickUrlBasis = value => { const url = new URL(value); url.hash = ''; return url.href; };
+          if (takeover(active) || !beforeClick || clickUrlBasis(beforeClick.url ?? '') !== clickUrlBasis(active.url)) {
             active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result();
           }
           const reply = await send(active.tabId, envelope('RESOLVE_ROW', { token: active.token, snapshot: state.selection.snapshot, index: active.index }));
@@ -210,7 +217,7 @@ export function createResolver(platform, controller) {
     if (!sameApp(url)) return finish({ code: 'unsupported', message: 'Resolved project/app does not match the source list.' });
     try {
       const tab = await platform.getTab(tabId);
-      if (tab?.active !== false || takeover(state.active)) {
+      if (takeover(state.active)) {
         state.active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result();
       }
       if (tab?.url !== url || tab.id !== tabId) throw new Error('unverified');

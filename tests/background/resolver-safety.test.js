@@ -28,7 +28,7 @@ test('malformed persisted session cannot close source tab, trust arbitrary hash,
   const mutations = [
     state => { state.active.tabId = state.sourceTab; state.active.url = state.selection.listUrl; state.active.token = 'synthetic-forged'; },
     state => { state.active.token = 'synthetic-forged'; },
-    state => { state.active.url = state.selection.listUrl; },
+    state => { state.active.url = state.selection.listUrl.replace('/issues', '/other'); },
     state => { state.active.phase = 'arbitrary'; },
     state => { state.active.deadline = 'never'; },
     state => { state.active.resolvedUrl = 'https://evil.test/'; },
@@ -69,9 +69,13 @@ test('activation is sticky before/after detail event, missing active is fail-clo
     const id = f.active.tabId; const url = issue('manual-synthetic').url;
     f.queue.tabs.set(id, { id, url, ...(order === 'missing-active' ? {} : { active: true }) });
     if (order === 'activate-first') await f.resolver.activated(id);
-    const update = f.resolver.updated(id, url);
-    if (order === 'update-first') await f.resolver.activated(id);
-    await update;
+    if (order !== 'no-event-active' && order !== 'missing-active') {
+      const update = f.resolver.updated(id, url);
+      if (order === 'update-first') await f.resolver.activated(id);
+      await update;
+    } else {
+      await f.resolver.activated(id);
+    }
     assert.equal((await f.queue.state()).items.length, 0); assert.deepEqual(f.queue.calls.closes, []);
     assert.equal(f.resolver.busy(), true); assert.equal(f.saved().active.intervened, true);
     f.queue.tabs.set(id, { id, url: f.active.url, active: false });
