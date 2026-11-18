@@ -5,7 +5,7 @@ import { validateIssue } from '../../src/domain/model.js';
 import { ISSUE_URL, URL_BASE } from './fake-dom.js';
 
 test('strict Android URL parsing normalizes query/hash and preserves event ID', () => {
-  const issue = parseIssueUrl(`${ISSUE_URL}?noise=remove&eventId=synthetic-event#crashbridge-job=ignore`);
+  const issue = parseIssueUrl(`${ISSUE_URL}?noise=remove&eventId=synthetic-event&crashbridge-job=ignore#fragment`);
   assert.deepEqual(issue, { projectId: 'synthetic-project', appId: 'android:example.synthetic', issueId: 'synthetic-issue', title: null, url: `${ISSUE_URL}?eventId=synthetic-event` });
   assert.deepEqual(validateIssue(issue), issue);
   assert.equal(parseIssueUrl(`${ISSUE_URL}/`).url, ISSUE_URL);

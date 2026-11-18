@@ -2,15 +2,19 @@ import { discoverIssues, extractCapture, parseIssueUrl } from '../adapter/fireba
 import { issueKey, LIMITS } from '../domain/model.js';
 import { readList, listUrl, matchRow, RESOLVE_HASH } from '../adapter/selection.js';
 
-const JOB = /^#crashbridge-job=([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/i;
+const JOB = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 /** @param {string} url @returns {{jobId:string,issue:object}|null} */
 export function parseCaptureJob(url) {
   let parsed;
   try { parsed = new URL(url); } catch { return null; }
-  const match = JOB.exec(parsed.hash);
+  const jobs = parsed.searchParams.getAll('crashbridge-job');
+  const legacyPrefix = '#crashbridge-job=';
+  if (jobs.length > 1) return null;
+  const jobId = jobs[0] ?? (parsed.hash.toLowerCase().startsWith(legacyPrefix) ? parsed.hash.slice(legacyPrefix.length) : null);
+  if (!jobId || !JOB.test(jobId)) return null;
   const issue = parseIssueUrl(url);
-  return match && issue ? { jobId: match[1], issue } : null;
+  return issue ? { jobId, issue } : null;
 }
 
 /** Browser boundaries are injectable; parsing/extraction always use the real adapter. @param {object} [environment] */

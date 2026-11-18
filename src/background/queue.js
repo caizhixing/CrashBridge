@@ -61,10 +61,11 @@ export function createController(platform) {
 
   function sameTab(tab, active) {
     const item = state.items.find((entry) => entry.key === active.key);
-    if (!item) return false;
-    const expected = new URL(item.issue.url);
-    expected.hash = `crashbridge-job=${active.jobId}`;
-    return tab?.id === active.tabId && tab.url === active.url && active.url === expected.href;
+    if (!item || tab?.id !== active.tabId || tab.url !== active.url) return false;
+    if (active.url === captureUrl(item.issue.url, active.jobId)) return true;
+    const legacy = new URL(item.issue.url);
+    legacy.hash = `crashbridge-job=${active.jobId}`;
+    return active.url === legacy.href;
   }
 
   async function cleanup(active, alreadyClosed = false) {
@@ -167,8 +168,7 @@ export function createController(platform) {
       return save();
     }
     const jobId = platform.uuid();
-    const url = new URL(item.issue.url);
-    url.hash = `crashbridge-job=${jobId}`;
+    const url = captureUrl(item.issue.url, jobId);
     item.status = 'collecting';
     item.capture = null;
     item.error = null;
@@ -179,10 +179,10 @@ export function createController(platform) {
     }
     let active = null;
     try {
-      const tabId = await platform.open(url.href);
+      const tabId = await platform.open(url);
       if (!Number.isInteger(tabId)) throw new Error('Browser returned no capture tab ID.');
       active = {
-        key: item.key, tabId, jobId, url: url.href,
+        key: item.key, tabId, jobId, url,
         deadline: new Date(Date.parse(platform.now()) + LIMITS.timeoutMs).toISOString(),
       };
       state.active = active;
@@ -330,6 +330,12 @@ export function createController(platform) {
     handle: (message, sender) => serialize(() => handleNow(message, sender)),
     recover: () => serialize(recoverNow),
   };
+}
+
+function captureUrl(issueUrl, jobId) {
+  const url = new URL(issueUrl);
+  url.searchParams.set('crashbridge-job', jobId);
+  return url.href;
 }
 
 function emptyState() {

@@ -1,5 +1,11 @@
 # CrashBridge 决策日志
 
+## 2026-11-18：详情采集任务标识改用查询参数
+
+用户报告所有 Issue 详情采集均60秒超时。诊断确认列表解析已成功，失败发生在Firebase详情SPA清除 `#crashbridge-job=<uuid>` 后，content script丢失任务身份，未发送CAPTURE_RESULT。决定将采集token写入 `crashbridge-job` 查询参数，兼容旧hash；保持IssueRef规范化不携带job token，详情身份仍按当前Issue URL匹配。已补fragment移除、query job和legacy hash回归，单测135项全绿。
+
+影响：background queue URL生成/恢复和content parseCaptureJob；Firebase query参数保留行为仍需真实重试验证。旧hash包保留向后兼容。若采集详情路由会丢弃未知query，仍需显式unsupported而非误归属。
+
 ## 2026-11-17：真实列表没有 Issue ID 的入队修复
 
 背景：用户授权在独立 Ego Lite 上调试 Firebase/CrashBridge，禁止访问其他内容或导出真实数据。实测列表4条标题链接均href=#，无DOM ID属性；原按钮在viewport下且disabled，管理页为空。点击单个标题可导航真实详情URL，随后返回列表，未读取堆栈/修改状态。

@@ -4,13 +4,23 @@ import { parseCaptureJob, mountContent } from '../../src/content/app.js';
 import { parseMessage } from '../../src/domain/protocol.js';
 import { element, makeDocument, stackDocument, addIssueRow, browserEnvironment, flush, ISSUE_URL, URL_BASE, STACK } from './fake-dom.js';
 const UUID = '12345678-1234-4234-8234-123456789abc';
-const JOB_URL = `${ISSUE_URL}#crashbridge-job=${UUID}`;
+const JOB_URL = `${ISSUE_URL}?crashbridge-job=${UUID}`;
+const LEGACY_JOB_URL = `${ISSUE_URL}#crashbridge-job=${UUID}`;
 const root = document => document.querySelector('[data-crashbridge-root]').shadowRoot;
 const checkboxes = document => document.querySelectorAll('[data-crashbridge-control]').map(host => host.shadowRoot.querySelector('input'));
 
-test('job parser requires exact UUID hash and supported issue identity', () => {
-  assert.equal(parseCaptureJob(JOB_URL).jobId, UUID);
-  for (const url of [ISSUE_URL, `${ISSUE_URL}#crashbridge-job=arbitrary`, JOB_URL + '&extra=1', JOB_URL.replace('console.firebase.google.com', 'evil.test'), `${URL_BASE}#crashbridge-job=${UUID}`, 'invalid']) assert.equal(parseCaptureJob(url), null, url);
+test('job parser supports query UUIDs and legacy hashes on supported issue URLs', () => {
+  for (const url of [JOB_URL, LEGACY_JOB_URL, LEGACY_JOB_URL.replace('crashbridge-job', 'CRASHBRIDGE-JOB')]) {
+    assert.equal(parseCaptureJob(url).jobId, UUID);
+    assert.equal(parseCaptureJob(url).issue.url, ISSUE_URL);
+  }
+  assert.equal(parseCaptureJob(`${JOB_URL}#crashbridge-job=ignored`).jobId, UUID);
+  for (const url of [
+    ISSUE_URL, `${ISSUE_URL}#crashbridge-job=arbitrary`, LEGACY_JOB_URL + '&extra=1',
+    JOB_URL.replace(UUID, 'arbitrary'), `${JOB_URL}&crashbridge-job=${UUID}`, `${JOB_URL}%0A`,
+    `${ISSUE_URL}?crashbridge-job=#crashbridge-job=${UUID}`,
+    JOB_URL.replace('console.firebase.google.com', 'evil.test'), `${URL_BASE}?crashbridge-job=${UUID}`, 'invalid',
+  ]) assert.equal(parseCaptureJob(url), null, url);
 });
 
 test('shadow checkboxes do not duplicate; native links untouched; cross-page ADD messages accumulate', async () => {
@@ -52,18 +62,34 @@ test('ambiguous rows offer no checkbox; SPA href update removes stale selection'
   app.dispose();
 });
 
-test('capture waits for DOM then submits exactly once with domain-valid payload', async () => {
-  const document = makeDocument(JOB_URL); const environment = browserEnvironment(document);
+test('capture survives fragment removal while waiting for DOM and submits once with the query job and event', async () => {
+  const detailUrl = `${JOB_URL}&eventId=event-a`;
+  const document = makeDocument(`${detailUrl}#initial-fragment`); const environment = browserEnvironment(document);
   const app = mountContent(environment);
   assert.equal(environment.sent.length, 0); assert.equal([...environment.timers.values()][0].ms, 60000);
+  await navigate(environment, detailUrl);
+  assert.equal(environment.sent.length, 0);
   const section = element('section', '', { 'aria-label': 'Stack trace' }); section.append(element('pre', STACK)); document.body.append(section);
   environment.observers[0].emit(); await flush();
   assert.equal(environment.sent.length, 1); const message = parseMessage(environment.sent[0]);
   assert.equal(message.type, 'CAPTURE_RESULT'); assert.equal(message.payload.jobId, UUID);
+  assert.equal(message.payload.capture.issue.url, `${ISSUE_URL}?eventId=event-a`);
+  assert.equal(message.payload.capture.event.eventId, 'event-a');
   assert.equal(message.payload.capture.stacktrace, STACK); assert.equal(message.payload.error, null);
   assert.equal(environment.timers.size, 0);
   environment.observers[0].emit(); environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
   assert.equal(environment.sent.length, 1); assert.match(root(document).textContent, /已保存/);
+  app.dispose();
+});
+
+test('capture still submits from a detail document with a legacy job hash', async () => {
+  const environment = browserEnvironment(stackDocument(LEGACY_JOB_URL).document);
+  const app = mountContent(environment);
+  await flush();
+  assert.equal(environment.sent.length, 1);
+  const { jobId, capture } = parseMessage(environment.sent[0]).payload;
+  assert.equal(jobId, UUID);
+  assert.equal(capture.stacktrace, STACK);
   app.dispose();
 });
 
@@ -136,9 +162,9 @@ const navigate = async (environment, url) => {
   environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
 };
 for (const [name, nextUrl] of [
-  ['issue and job', `${ISSUE_URL.replace('synthetic-issue', 'issue-b')}#crashbridge-job=${NEXT_UUID}`],
-  ['event and job', `${ISSUE_URL}?eventId=event-b#crashbridge-job=${NEXT_UUID}`],
-  ['job only', `${ISSUE_URL}#crashbridge-job=${NEXT_UUID}`],
+  ['issue and job', JOB_URL.replace('synthetic-issue', 'issue-b').replace(UUID, NEXT_UUID)],
+  ['event and job', `${JOB_URL.replace(UUID, NEXT_UUID)}&eventId=event-b`],
+  ['job only', JOB_URL.replace(UUID, NEXT_UUID)],
 ]) {
   test(`${name} navigation never labels retained A DOM as B, even after B DOM arrives`, async () => {
     const { document, pre } = stackDocument(JOB_URL, `${STACK}\nSYNTHETIC_A_ONLY`);
@@ -163,8 +189,8 @@ for (const [name, nextUrl] of [
 }
 
 for (const [name, nextUrl] of [
-  ['issue', `${ISSUE_URL.replace('synthetic-issue', 'issue-b')}#crashbridge-job=${UUID}`],
-  ['event', `${ISSUE_URL}?eventId=event-b#crashbridge-job=${UUID}`],
+  ['issue', JOB_URL.replace('synthetic-issue', 'issue-b')],
+  ['event', `${JOB_URL}&eventId=event-b`],
 ]) {
   test(`same job UUID cannot change ${name} while initial document is still loading`, async () => {
     const { document, pre } = stackDocument(JOB_URL, `${STACK}\nSYNTHETIC_A_ONLY`);

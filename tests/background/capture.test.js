@@ -22,6 +22,18 @@ test('capture opens one tab at a time, uses 60s alarms and retains user tabs', a
   assert.equal(f.calls.opens.length, 2, 'successful items must not be captured again');
 });
 
+test('capture opens a fragment-free job URL and preserves the Firebase event query', async () => {
+  const f = fixture();
+  const ref = issue();
+  ref.url += '?eventId=synthetic-event';
+  await f.add([ref]);
+  const { data: { active } } = await f.manage('START_CAPTURE');
+  assert.equal(f.calls.opens[0].url, `${ref.url}&crashbridge-job=${active.jobId}`);
+  assert.equal(f.calls.opens[0].url, active.url);
+  assert.equal((await f.result()).ok, true);
+  assert.deepEqual(f.calls.closes, [active.tabId]);
+});
+
 test('capture callbacks require tab, job, issue, exact job URL and capture identity', async () => {
   const f = fixture();
   await f.add(); await f.manage('START_CAPTURE');
