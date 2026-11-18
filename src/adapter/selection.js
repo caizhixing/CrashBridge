@@ -2,7 +2,7 @@ import { pageIdentity, parseIssueUrl } from './firebase.js';
 
 export const MAX_SELECTION_BYTES = 262144;
 const LIST = /^\/project\/[^/]+\/crashlytics\/app\/android:[^/]+(?:\/issues\/?)?$/;
-export const RESOLVE_HASH = /^#crashbridge-resolve=([\da-f-]{36})$/i;
+export const RESOLVE_HASH = /^#crashbridge-resolve=([\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12})$/i;
 
 /** List navigation preserves filters, never credentials or an arbitrary route. */
 export function listUrl(value) {

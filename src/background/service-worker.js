@@ -46,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   serialize(async () => {
     if (resolverTypes.includes(message?.type)) return resolver.handle(message, sender);
     if (message?.type === 'OPEN_MANAGER') {
-      if (message.namespace !== 'crashbridge' || message.version !== 1 || sender.id !== new URL(browser.extensionUrl('manager.html')).host || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) || !listUrl(sender.url) || Object.keys(message.payload ?? {}).length) throw new Error('Invalid manager opener source.');
+      if (message.namespace !== 'crashbridge' || message.version !== 1 || sender.id !== new URL(browser.extensionUrl('manager.html')).host || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) || !listUrl(sender.url) || !message.payload || typeof message.payload !== 'object' || Array.isArray(message.payload) || Object.keys(message.payload).length || new TextEncoder().encode(JSON.stringify(message)).length > 262144) throw new Error('Invalid manager opener source.');
       await chrome.tabs.create({ url: browser.extensionUrl('manager.html') });
       return { ok: true, data: {} };
     }
@@ -66,6 +66,10 @@ chrome.tabs.onRemoved.addListener(tabId => {
     await resolver.closed(tabId);
     await controller.handle({ namespace: 'crashbridge', version: 1, type: 'TAB_CLOSED', payload: { tabId } });
   });
+});
+chrome.tabs.onActivated.addListener(info => {
+  // Mark immediately rather than waiting behind an in-flight content handshake.
+  void resolver.activated(info.tabId);
 });
 chrome.tabs.onUpdated.addListener((tabId, change) => {
   if (change.url) void serialize(() => resolver.updated(tabId, change.url));

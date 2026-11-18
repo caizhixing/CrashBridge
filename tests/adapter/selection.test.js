@@ -42,6 +42,22 @@ test('anonymous observed hash rows preserve native checkbox and support independ
   app.dispose();
 });
 
+test('selected row substitution and reordered snapshot before observer flush never resolve a different row', async () => {
+  for (const mutate of ['title', 'reorder']) {
+    const document = makeDocument(URL_BASE); const first = hashRow(document, 'Synthetic A'); const second = hashRow(document, 'Synthetic B');
+    const environment = browserEnvironment(document); const app = mountContent(environment);
+    const toolbar = document.querySelector('[data-crashbridge-root]').shadowRoot;
+    const input = document.querySelector('[data-crashbridge-control]').shadowRoot.querySelector('input');
+    input.checked = true; input.listeners.get('change')();
+    if (mutate === 'title') first.heading.querySelector('span').textContent = 'Synthetic replacement';
+    else document.body.append(first.row);
+    await toolbar.querySelector('button').click();
+    assert.equal(environment.sent.some(message => message.type === 'RESOLVE_SELECTION'), false);
+    assert.match(toolbar.textContent, /列表已变化/); assert.equal(first.native.checked, true); assert.equal(second.native.checked, true);
+    app.dispose();
+  }
+});
+
 test('full ordered snapshot and unique fingerprints reject reorder, edits, duplicates and hidden titles', () => {
   const document = makeDocument(URL_BASE); const a = hashRow(document, ' A   synthetic '); const b = hashRow(document, 'B synthetic');
   const before = snapshot(document); assert.equal(before[0].title, 'A synthetic');
@@ -77,6 +93,8 @@ test('only owned token-bound instructions click a matched caption, and source CH
   listener({ ...message, payload: { ...message.payload, token: 'wrong' } }, { id: environment.runtime.id }, value => { reply = value; }); assert.equal(reply.ok, false);
   listener({ ...message, type: 'CHECK_SELECTION' }, { id: environment.runtime.id }, value => { reply = value; }); assert.equal(reply.ok, true); assert.equal(clicks, 0);
   listener(message, { id: environment.runtime.id }, value => { reply = value; }); assert.equal(reply.ok, true); await flush(); assert.equal(clicks, 1);
+  document.visibilityState = 'visible'; listener(message, { id: environment.runtime.id }, value => { reply = value; }); await flush(); assert.equal(reply.ok, false); assert.equal(clicks, 1);
+  document.visibilityState = 'hidden';
   row.heading.textContent = 'Changed'; listener(message, { id: environment.runtime.id }, value => { reply = value; }); await flush(); assert.equal(reply.ok, false); assert.equal(clicks, 1);
   app.dispose();
 });

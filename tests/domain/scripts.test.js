@@ -88,6 +88,10 @@ test('CLI coverage uses native per-file reports, rejects unloaded domain and que
   passed(green);
   assert.match(green.stdout, /src\/domain\/model.js: 100.00% lines \(required 100%\)/);
   assert.match(green.stdout, /src\/background\/queue.js: 100.00% lines \(required 90%\)/);
+  await put('src/background/resolver.js', 'export const resolver = 4;\n');
+  failed(cli('coverage'), /resolver.js: 0.00%.*NOT LOADED/);
+  await put('tests/resolver.test.js', "import { resolver } from '../src/background/resolver.js';\nimport test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('state module is covered', () => assert.equal(resolver, 4));\n");
+  passed(cli('coverage'));
   await put('src/domain/unloaded.js', 'export function neverLoaded() {\n  return 1;\n}\n');
   failed(cli('coverage'), /unloaded.js: 0.00%.*NOT LOADED/);
   await put('tests/synthetic.test.js', "import '../src/domain/unloaded.js';\nimport { value } from '../src/domain/model.js';\nimport { value as queue } from '../src/background/queue.js';\nimport test from 'node:test';\nimport assert from 'node:assert/strict';\ntest('real imports', () => assert.equal(value + queue, 3));\n");
