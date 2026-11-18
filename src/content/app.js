@@ -254,13 +254,32 @@ export function mountContent(environment = {}) {
   manager.addEventListener('click', onManager);
   cancel.addEventListener('click', onCancel);
   const instructionTimers = new Set();
+  const pendingInstructions = new Set();
+  let resolverIntervened = Boolean(resolveToken && document.visibilityState === 'visible');
+  const onVisibilityChange = () => {
+    if (!resolveToken || document.visibilityState !== 'visible') return;
+    resolverIntervened = true;
+    for (const id of instructionTimers) clearTimer(id);
+    instructionTimers.clear();
+    for (const abort of [...pendingInstructions]) abort();
+  };
+  document.addEventListener('visibilitychange', onVisibilityChange);
   const onInstruction = (message, sender, reply) => {
     if (sender.id !== runtime.id || message?.namespace !== 'crashbridge' || message.version !== 1 || !['RESOLVE_ROW', 'CHECK_SELECTION'].includes(message.type)) return;
     let attempts = 0;
+    let replied = false;
+    const respond = value => {
+      if (replied) return;
+      replied = true;
+      pendingInstructions.delete(abort);
+      reply(value);
+    };
+    const abort = () => respond({ ok: false });
+    if (message.type === 'RESOLVE_ROW') pendingInstructions.add(abort);
     const attempt = () => {
       try {
         if (disposed) throw new Error('Disposed content.');
-        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] !== resolveToken || document.visibilityState === 'visible')) throw new Error('Unowned or user-visible resolver document.');
+        if (message.type === 'RESOLVE_ROW' && (!resolveToken || message.payload?.token !== resolveToken || RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] !== resolveToken || resolverIntervened || document.visibilityState === 'visible')) throw new Error('Unowned or user-visible resolver document.');
         // Fresh SPA lists can render a prefix first. Wait at most 3 seconds for all
         // expected rows; equal-length edits/reorder/ambiguity fail immediately.
         if (message.type === 'RESOLVE_ROW' && attempts++ < 12 && readList(document, window.location.href).length < message.payload.snapshot.length) {
@@ -268,14 +287,14 @@ export function mountContent(environment = {}) {
           instructionTimers.add(id); return;
         }
         const anchor = matchRow(document, window.location.href, message.payload);
-        reply({ ok: true });
+        respond({ ok: true });
         if (message.type === 'RESOLVE_ROW') queueMicrotask(() => {
-          if (document.visibilityState !== 'visible' && !disposed && RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] === resolveToken) {
+          if (!resolverIntervened && document.visibilityState !== 'visible' && !disposed && RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] === resolveToken) {
             try { if (matchRow(document, window.location.href, message.payload) === anchor) anchor.click(); }
             catch { /* The background deadline reports a changed page without clicking. */ }
           }
         });
-      } catch { reply({ ok: false }); }
+      } catch { respond({ ok: false }); }
     };
     attempt();
     return true;
@@ -304,6 +323,8 @@ export function mountContent(environment = {}) {
     observer.disconnect();
     if (timer !== null) clearTimer(timer);
     document.removeEventListener('readystatechange', schedule);
+    document.removeEventListener('visibilitychange', onVisibilityChange);
+    for (const abort of [...pendingInstructions]) abort();
     window.removeEventListener('load', schedule);
     window.removeEventListener('hashchange', schedule);
     window.removeEventListener('popstate', schedule);
