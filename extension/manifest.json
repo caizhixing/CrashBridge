@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "CrashBridge · 本地日志导出",
+  "version": "0.1.0",
+  "description": "在本机整理 Crashlytics 问题、预览并导出日志。真实控制台兼容性尚未验证。",
+  "permissions": ["storage", "alarms", "downloads"],
+  "host_permissions": ["https://console.firebase.google.com/*"],
+  "background": { "service_worker": "src/background/service-worker.js", "type": "module" },
+  "action": { "default_title": "打开 CrashBridge 管理页" },
+  "content_scripts": [{
+    "matches": ["https://console.firebase.google.com/*"],
+    "js": ["src/content/main.js"],
+    "run_at": "document_idle"
+  }],
+  "web_accessible_resources": [{
+    "resources": ["src/content/app.js", "src/adapter/firebase.js", "src/adapter/selection.js", "src/domain/model.js"],
+    "matches": ["https://console.firebase.google.com/*"]
+  }],
+  "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }
+}

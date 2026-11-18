@@ -1,5 +1,21 @@
 # CrashBridge 决策日志
 
+## 2026-11-17：真实列表没有 Issue ID 的入队修复
+
+背景：用户授权在独立 Ego Lite 上调试 Firebase/CrashBridge，禁止访问其他内容或导出真实数据。实测列表4条标题链接均href=#，无DOM ID属性；原按钮在viewport下且disabled，管理页为空。点击单个标题可导航真实详情URL，随后返回列表，未读取堆栈/修改状态。
+
+用户明确选择：独立CrashBridge勾选+固定工具栏+临时标签页只读导航解析真实ID，原列表不改变；歧义或快照变动失败，不按标题去重。被否备选：保留不适用旧实现；凭标题/行号伪造ID；读取Angular内部状态或私有接口。
+
+影响面：adapter/content行发现与本地临时选择、固定UI；background受控标签解析与capture互斥；新增解析消息验证及精确WAR；旧IssueRef/导出schema/复合去重key不变。验收与降级详见docs/prd/real-list-hotfix.md。模型与Public隐私豁免沿用，worker/reviewer显式gpt-6.1-sol high。真实DOM结构仅记匿名摘要，实际URL/标题/ID不进入仓库或GitHub。只验证当前Ego列表，不扩称Chrome/Edge或堆栈采集已验收。
+
+## 2026-11-17：临时解析页被用户接管的保护
+
+用户在选择框中明确采用：解析临时标签默认后台打开，用户激活即停止，不入队、不继续点击、不关闭已接管页；必须关闭临时页后重新选择重试。后台onActivated同步sticky标记，接收导航/发点击/清理前复核getTab.active，active缺失也不猜成功。覆盖create返回前激活、CHECK_SELECTION等待中激活和onUpdated竞态。
+
+恢复时不信任session任意active.url/resolvedUrl：校验完整结构、源tab排除、token/hash与预期listURL重建。仅精确后台列表页自动清理，已导航详情保留并提示手动关闭。未知session fail closed，避免误关用户原列表。这是既有身份不可核实不误关的安全细化，不增加权限或数据来源。
+
+影响面：resolver恢复/发送/入队/清理；service-worker激活事件；content发点击前visibility守卫与相应合成测试。选中后源DOM同步替换也须提交前复核原snapshot，不能把A选择变成B。无新导出schema或IssueRef变化。不承诺抵御其他扩展/CDP在inactive标签的恶意导航归因。
+
 ## 2026-11-16：多 Agent 流程与模型选择（选型已完成）
 
 ### 背景
@@ -12,7 +28,7 @@
 |---|---|---|---|
 | main | 当前会话 GPT-6.1 Sol | 当前档位，未另行指定 | 模型由运行时声明为 gpt-6.1-sol；level 不可见，记 unknown |
 | worker | tb-gpt/gpt-6.1-sol | high（用户明确指定） | 四项实际 subagent 调用均显式传 provider=tb-gpt、model=gpt-6.1-sol、reasoning_effort=high；子 Agent 已确认收到派单参数 |
-| reviewer | tb-gpt/gpt-6.1-sol（用户在 GLM 不可用后明确改选） | high（用户明确指定，优先于 skill 的最高档默认） | 平台列出该模型并支持 high；尚未派单 |
+| reviewer | tb-gpt/gpt-6.1-sol（用户在 GLM 不可用后明确改选） | high（用户明确指定，优先于 skill 的最高档默认） | 实际独立 Reviewer 调用显式传 tb-gpt / gpt-6.1-sol / high；PR verdict 如实署名 |
 
 初次及后续查询仅列出 provider `tb-gpt` 的模型 `gpt-6.1-sol`，支持 medium/high/xhigh。用户先不接受同家族评审并指定 GLM-5.3 / high；在告知 GLM 尚不可调用后，用户明确改为 Reviewer 也使用 GPT-6.1 Sol / high。该最新指令构成同模型家族评审的明确例外，覆盖先前等待跨家族模型的要求。Worker 与 Reviewer 均显式传 tb-gpt/gpt-6.1-sol、reasoning_effort=high；评审保留独立上下文、独立 worktree、测试复核，承认错误相关性风险，不宣称跨模型评审。模型选型已完成；进入 PRD 草案确认，冻结前不建单或开发。
 
@@ -34,11 +50,11 @@ GitHub 仓库 `caizhixing/CrashBridge` 实际可见性为 PUBLIC；skill 默认�
 
 用户显式调用 multi-agent-pr-flow；按该 skill 的项目内豁免允许 CrashBridge 仓库及后续 worktree 的 Git 操作，不外溢到其他仓库。ADB/模拟器/UI 验证豁免即使存在也仅限本项目，不授权控制 Firebase 或其他应用；本任务是浏览器扩展，不需要 Android 设备操作。隐私最小化要求持续有效。
 
-本次已检查：当前目录、Git 状态与远端、GitHub 登录状态、远端可见性及可用模型。尚未修改远端可见性、创建提交、推送、建单、创建 PR 或启动子 Agent。
+初始阶段检查了当前目录、Git 状态与远端、GitHub 登录、远端可见性和模型。用户确认 PRD 后已提交并推送规格、建立 milestone / Issue #1–#4、并行开发并创建 PR #5–#8；实现仅组合到本地 integration/v1，未获最终批准前不合并远端 main。远端可见性保持 Public。
 
 ## 待确认事项
 
-- 模型选择已完成：main 当前 GPT-6.1 Sol（level unknown），worker / reviewer 均为 tb-gpt/gpt-6.1-sol / high；同家族例外经用户明确授权。待确认 PRD 与 worktree 父目录后执行开发。
+- 模型选择及 PRD 已确认；worker / reviewer 实际调用均显式 tb-gpt/gpt-6.1-sol / high；同家族例外经用户明确授权。独立评审已实际执行，不使用开发 Agent 自审。
 - 已收到用户“继续”指令；尝试恢复持久化目标时工具返回 `the model cannot resume a paused goal; the user must resume it`。未将目标标记完成，也未绕过工具限制创建重复目标；不影响本轮整理草案。
 - 用户确认 worktree 父目录 `E:\work\CrashBridge-wt`；用户确认 v1 PRD 并选择暂无真实 DOM 样本，先开发且明确兼容性未验证。
 - v1 PRD 已确认冻结；精确模块附录 docs/contracts.md，任务 #1–#4 已创建并认领。生产 Firebase DOM 兼容仍未验证。
@@ -62,3 +78,20 @@ human-touch: 阶段 3，用户确认 PRD 未覆盖的浏览器资源故障安全
 ## 2026-11-16：页面识别支持边界
 
 暂仅精确 Android Crashlytics issue 路由；appId 使用路由字面值 android:<package>。堆栈只在限定语义区域提取且验证 Android Java/native frame；多个歧义区域 unsupported，空/无 frame missing-stack。元数据缺失或歧义留 null，不读取整页文本替代堆栈。属保守适配技术边界，不宣称真实页面已经验证。使用者为 adapter、域 validateIssue、background sender 校验与 fixtures；身份约定保持一致。
+
+评审要求补强同一边界：只读取实际显示文本（hidden / aria-hidden / CSS 隐藏后代不读），每个采集 document 绑定初始 job/issue/event 身份；文档内 SPA 身份变动后不猜测旧堆栈归属，保守失败并由新标签重试。无需新增虚构 Firebase DOM 标记。该策略是纠正“仅当前渲染且身份可靠”既有要求的误实现，接口、采集范围与错误枚举不变。
+
+## 2026-11-16：状态同步与下载快照的竞态
+
+为了确保 storage 写入失败后保留的内存状态可见，管理页可见时每 2 秒 GET_STATE 只读兜底，隐藏暂停、在途合并、页面销毁停止；不联网、不触发采集。已有 GET_STATE 在下载开始后返回时，必须忽略该过期结果，下载终态再刷新。预览与 Blob 始终来自同一快照，不能用新读取覆盖下载中的预览。此为冻结预览契约的修复，不新增业务范围。
+
+## 2026-11-16：独立评审与返工记账（评审和集成门禁已完成，待最终合并）
+
+- PR #6（domain/tooling）round 1 pass：独立 16 项测试、逐域文件 100% 行覆盖，并实际恶意输入/路径测试。
+- PR #8（background）round 1 fail：缺 URL 标签页身份被误判清理成功；3 条运行 guard 测试误传 payload，只验证了协议拒绝。rework-1 修复并增加回归；round 2 pass：23 项测试、queue 100% 行覆盖。
+- PR #5（adapter）round 1 fail：读取隐藏文本、SPA URL 先变造成旧堆栈误归属；rework-1 修复，round 2 pass：独立49项相关测试、额外28个隐藏文本交叉场景与新document采集复核通过。
+- PR #7（manager）round 1 fail：在途读取覆盖下载快照；rework-1 已补真实 manager glue 回归，round 2 pass：25 项 UI 测试，独立复现实验 12 个终态/读取时序场景通过。
+- 主 Agent 新增跨模块 pipeline 两项集成测试（实际 adapter→protocol→queue→双格式过滤导出），不是用 mock 替代被测模块。
+- 异常退出/未发布 verdict 的 reviewer 启动不计评审轮；不会将无结论任务算 pass。页面适配原 worker 多次异常且进度停滞后，主 Agent 先 interrupt，再由新的相同模型/high worker 接管原树未提交修改，不丢弃现场、不双写；评审仍由原独立 Reviewer 执行。
+- 有效空断言/假阳性打回次数：1（background guard 测试的 payload 错误；其余断言未被笼统否定）。
+- 阶段 2–5 额外人触点：1（安全停批补充确认）；模型选择、PRD定稿、最终合并属于设计内门，不计额外干预。
