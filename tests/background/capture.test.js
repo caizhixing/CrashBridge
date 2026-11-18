@@ -45,7 +45,7 @@ test('capture callbacks require tab, job, issue, exact job URL and capture ident
     [{ ...valid, jobId: '00000000-0000-4000-8000-000000000099' }, sender],
     [{ ...valid, issueKey: key(issue('other')) }, sender],
     [valid, { ...sender, tab: { id: 7 } }],
-    [valid, { ...sender, url: issue().url }],
+    [valid, { ...sender, url: 'https://example.invalid/wrong-app' }],
     [valid, { ...sender, id: 'other' }],
     [{ ...valid, capture: capture(issue('other')) }, sender],
   ]) {

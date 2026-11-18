@@ -209,7 +209,15 @@ for (const [name, nextUrl] of [
 
 test('a document initially without a job rejects an SPA-added job and binding invalidation is sticky', async () => {
   const { document } = stackDocument(ISSUE_URL); const environment = browserEnvironment(document);
-  const app = mountContent(environment); assert.equal(environment.sent.length, 0);
+  // Simulate: background says no active job (queriedJob stays null).
+  environment.runtime.sendMessage = async msg => {
+    if (msg?.type === 'QUERY_ACTIVE_JOB') return { ok: true, data: null };
+    environment.sent.push(msg);
+    return { ok: true, data: {} };
+  };
+  const app = mountContent(environment);
+  await new Promise(r => setTimeout(r, 10));
+  assert.equal(environment.sent.length, 0);
   await navigate(environment, JOB_URL);
   assert.equal(environment.sent[0].payload.capture, null);
   assert.equal(environment.sent[0].payload.error.code, 'unsupported');

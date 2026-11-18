@@ -59,9 +59,24 @@ export function mountContent(environment = {}) {
   let selectedSnapshot = null;
   const resolveToken = RESOLVE_HASH.exec(new URL(window.location.href).hash)?.[1] ?? null;
   const completed = new Set();
-  const initialJob = parseCaptureJob(window.location.href);
   const binding = value => value ? JSON.stringify([value.jobId, issueKey(value.issue), value.issue.url]) : null;
-  const initialBinding = binding(initialJob);
+  let initialJob = parseCaptureJob(window.location.href);
+  let initialBinding = binding(initialJob);
+  let queriedJob = null;
+  let querySent = false;
+  const queryActiveJob = async () => {
+    if (querySent) return;
+    querySent = true;
+    try {
+      const reply = await runtime.sendMessage({ namespace: 'crashbridge', version: 1, type: 'QUERY_ACTIVE_JOB', payload: {} });
+      if (reply?.ok && reply.data && !disposed) {
+        queriedJob = reply.data;
+        if (!initialJob) { initialJob = queriedJob; initialBinding = binding(queriedJob); }
+        schedule();
+      }
+    } catch { /* Background unreachable; URL-based jobs still work. */ }
+  };
+  if (!initialJob && !resolveToken && parseIssueUrl(window.location.href)) void queryActiveJob();
   let navigationInvalidated = false;
   let disposed = false;
   let scheduled = false;
@@ -86,7 +101,7 @@ export function mountContent(environment = {}) {
   }
 
   function syncJob() {
-    const next = parseCaptureJob(window.location.href);
+    const next = parseCaptureJob(window.location.href) ?? queriedJob;
     // A URL change cannot establish ownership of a retained SPA stack. Only a new
     // document may bind a new job/issue/event; invalidation is sticky even on return.
     if (binding(next) !== initialBinding) navigationInvalidated = true;

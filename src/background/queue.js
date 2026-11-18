@@ -1,5 +1,6 @@
 import { LIMITS, issueKey, validateQueueItem, createQueueItem } from '../domain/model.js';
 import { parseMessage } from '../domain/protocol.js';
+import { parseIssueUrl } from '../adapter/firebase.js';
 
 /** @typedef {ReturnType<typeof createQueueItem>} QueueItem */
 /** @typedef {{code:string,message:string}} QueueError */
@@ -61,11 +62,11 @@ export function createController(platform) {
 
   function sameTab(tab, active) {
     const item = state.items.find((entry) => entry.key === active.key);
-    if (!item || tab?.id !== active.tabId || tab.url !== active.url) return false;
-    if (active.url === captureUrl(item.issue.url, active.jobId)) return true;
-    const legacy = new URL(item.issue.url);
-    legacy.hash = `crashbridge-job=${active.jobId}`;
-    return active.url === legacy.href;
+    if (!item || tab?.id !== active.tabId) return false;
+    const issue = parseIssueUrl(item.issue.url);
+    if (!issue) return false;
+    const tabIssue = parseIssueUrl(tab.url ?? '');
+    return tabIssue ? issueKey(tabIssue) === issueKey(issue) : false;
   }
 
   async function cleanup(active, alreadyClosed = false) {
@@ -290,11 +291,24 @@ export function createController(platform) {
         const active = state.active;
         const source = firebaseSender(sender);
         if (!source || !active || !state.running || sender.tab.id !== active.tabId || payload.jobId !== active.jobId
-            || payload.issueKey !== active.key || source.url.href !== active.url) {
-          throw new Error('Capture sender/tab/job/issue/URL mismatch.');
+            || payload.issueKey !== active.key) {
+          throw new Error('Capture sender/tab/job/issue mismatch.');
         }
         if (payload.capture && issueKey(payload.capture.issue) !== active.key) throw new Error('Capture issue mismatch.');
         return await finish(payload.error, payload.capture) ? success() : failure(state.lastError);
+      } else if (type === 'QUERY_ACTIVE_JOB') {
+        const active = state.active;
+        const source = firebaseSender(sender);
+        if (!source || !active || !state.running || sender.tab.id !== active.tabId) {
+          return { ok: true, data: null };
+        }
+        const item = state.items.find((entry) => entry.key === active.key);
+        if (!item) return { ok: true, data: null };
+        const activeIssue = parseIssueUrl(item.issue.url);
+        if (!activeIssue || source.projectId !== activeIssue.projectId || source.appId !== activeIssue.appId) {
+          return { ok: true, data: null };
+        }
+        return { ok: true, data: { jobId: active.jobId, issue: activeIssue } };
       } else {
         if (!managerSender(sender)) throw new Error('Only this extension manager can access the queue.');
         if (type === 'GET_STATE') return success();

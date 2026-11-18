@@ -37,8 +37,11 @@ test('recovery still closes an exact legacy capture hash URL', async () => {
 });
 
 test('recovery never closes reused IDs, navigated tabs, missing job tokens or forged stored URLs', async () => {
+  // With identity-based sameTab, a tab at the clean issue URL for the same tabId is now
+  // a valid capture tab (Firebase strips job tokens), so only foreign/wrong-app pages reject.
   for (const tab of [null, { id: 101, url: interrupted().active.url },
-    { id: 100, url: issue().url }, { id: 100, url: 'https://example.invalid/user-page' }]) {
+    { id: 100, url: 'https://example.invalid/user-page' },
+    { id: 100, url: 'https://console.firebase.google.com/project/synthetic-project/crashlytics/app/android:other.app/issues/other' }]) {
     const f = fixture(interrupted());
     if (tab) f.tabs.set(100, tab);
     await f.controller.recover();
