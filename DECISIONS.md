@@ -8,6 +8,14 @@
 
 影响面：adapter/content行发现与本地临时选择、固定UI；background受控标签解析与capture互斥；新增解析消息验证及精确WAR；旧IssueRef/导出schema/复合去重key不变。验收与降级详见docs/prd/real-list-hotfix.md。模型与Public隐私豁免沿用，worker/reviewer显式gpt-6.1-sol high。真实DOM结构仅记匿名摘要，实际URL/标题/ID不进入仓库或GitHub。只验证当前Ego列表，不扩称Chrome/Edge或堆栈采集已验收。
 
+## 2026-11-17：临时解析页被用户接管的保护
+
+用户在选择框中明确采用：解析临时标签默认后台打开，用户激活即停止，不入队、不继续点击、不关闭已接管页；必须关闭临时页后重新选择重试。后台onActivated同步sticky标记，接收导航/发点击/清理前复核getTab.active，active缺失也不猜成功。覆盖create返回前激活、CHECK_SELECTION等待中激活和onUpdated竞态。
+
+恢复时不信任session任意active.url/resolvedUrl：校验完整结构、源tab排除、token/hash与预期listURL重建。仅精确后台列表页自动清理，已导航详情保留并提示手动关闭。未知session fail closed，避免误关用户原列表。这是既有身份不可核实不误关的安全细化，不增加权限或数据来源。
+
+影响面：resolver恢复/发送/入队/清理；service-worker激活事件；content发点击前visibility守卫与相应合成测试。选中后源DOM同步替换也须提交前复核原snapshot，不能把A选择变成B。无新导出schema或IssueRef变化。不承诺抵御其他扩展/CDP在inactive标签的恶意导航归因。
+
 ## 2026-11-16：多 Agent 流程与模型选择（选型已完成）
 
 ### 背景
