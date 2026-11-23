@@ -82,8 +82,12 @@ export function mountContent(environment = {}) {
     host.style.left = `${Math.max(0, Math.min(position.x, window.innerWidth - 80))}px`;
     host.style.top = `${Math.max(0, Math.min(position.y, window.innerHeight - 40))}px`;
   };
-  if (storage?.get) void storage.get('crashbridge-toolbar-position').then(stored => { const p = stored?.['crashbridge-toolbar-position']; if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) applyPosition(p); }).catch(() => {});
-  else applyPosition(null);
+  if (storage?.get) {
+    void storage.get('crashbridge-toolbar-position').then(stored => {
+      const p = stored?.['crashbridge-toolbar-position'];
+      applyPosition(p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null);
+    }).catch(() => applyPosition(null));
+  } else applyPosition(null);
   let dragOrigin = null;
   headingBar.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
