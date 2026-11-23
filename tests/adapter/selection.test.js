@@ -70,6 +70,16 @@ test('full ordered snapshot and unique fingerprints reject reorder, edits, dupli
   assert.throws(() => validateSelection({ listUrl: URL_BASE, snapshot: snapshot(hidden), selected: [0] }), /descriptor/);
 });
 
+test('viewport-dependent cell counts do not break cross-tab row matching', () => {
+  const source = makeDocument(URL_BASE); const a = hashRow(source, 'A synthetic'); hashRow(source, 'B synthetic');
+  const before = snapshot(source);
+  // A temp tab at a different viewport renders more/fewer responsive columns.
+  const temp = makeDocument(URL_BASE); const ta = hashRow(temp, 'A synthetic'); hashRow(temp, 'B synthetic');
+  const extra = element('td', '', { role: 'gridcell' }); ta.row.append(extra);
+  assert.notEqual(snapshot(temp)[0].cells, before[0].cells, 'fixture must differ in cell count');
+  assert.equal(matchRow(temp, URL_BASE, { snapshot: before, index: 0 }), ta.anchor);
+});
+
 test('list URL and selection payload reject wrong origin/routes/credentials/oversize/bad indices; real href preserved', () => {
   for (const url of ['bad', ISSUE_URL, URL_BASE.replace('console.firebase.google.com', 'evil.test'), URL_BASE.replace('https://', 'https://user:pass@'), URL_BASE + '#arbitrary']) assert.equal(listUrl(url), null);
   assert.equal(listUrl(URL_BASE + '?filter=synthetic'), URL_BASE + '?filter=synthetic');

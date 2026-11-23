@@ -14,6 +14,17 @@ export function listUrl(value) {
   } catch { return null; }
 }
 
+/** Firebase rewrites list query params after load while Chromium sender URLs keep the
+ * committed navigation; compare origin+pathname (which embed project/app) instead. */
+export function sameListRoute(a, b) {
+  const first = listUrl(a);
+  const second = listUrl(b);
+  if (!first || !second) return false;
+  const left = new URL(first);
+  const right = new URL(second);
+  return left.origin === right.origin && left.pathname === right.pathname;
+}
+
 /** Temporary descriptors are not IssueRefs and are never deduplication identities. */
 export function validateSelection(payload) {
   if (!payload || new TextEncoder().encode(JSON.stringify(payload)).length > MAX_SELECTION_BYTES) throw new Error('Selection payload too large or invalid.');
@@ -62,9 +73,12 @@ export function readList(document, url) {
 }
 
 /** Re-read immediately before clicking; no row index fallback when the snapshot changed. */
+/** Cross-tab row identity: viewport-dependent column counts must not break matching. */
+const rowIdentity = descriptor => JSON.stringify({ title: descriptor.title, subtitle: descriptor.subtitle, href: descriptor.href });
+
 export function matchRow(document, url, payload) {
   const selection = validateSelection({ listUrl: listUrl(url), snapshot: payload.snapshot, selected: [payload.index] });
   const rows = readList(document, url);
-  if (JSON.stringify(rows.map(row => row.descriptor)) !== JSON.stringify(selection.snapshot)) throw new Error('List snapshot changed; refresh and select again.');
+  if (rows.map(row => rowIdentity(row.descriptor)).join('\n') !== selection.snapshot.map(rowIdentity).join('\n')) throw new Error('List snapshot changed; refresh and select again.');
   return rows[payload.index].anchor;
 }

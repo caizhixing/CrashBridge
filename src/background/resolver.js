@@ -1,5 +1,6 @@
-import { validateSelection, listUrl } from '../adapter/selection.js';
+import { validateSelection, listUrl, sameListRoute } from '../adapter/selection.js';
 import { pageIdentity, parseIssueUrl } from '../adapter/firebase.js';
+import { log } from './logger.js';
 
 const envelope = (type, payload = {}) => ({ namespace: 'crashbridge', version: 1, type, payload });
 const fail = (code, message) => ({ ok: false, error: { code, message } });
@@ -27,7 +28,7 @@ export function createResolver(platform, controller) {
   const result = () => ({ ok: true, data: state ? structuredClone({ running: state.running, results: state.results, error: state.error }) : { running: false, results: [], error: null } });
   const manager = { id: new URL(platform.extensionUrl('manager.html')).host, url: platform.extensionUrl('manager.html') };
   const own = sender => sender?.id === manager.id && sender.frameId === 0 && Number.isInteger(sender.tab?.id);
-  const source = sender => own(sender) && listUrl(sender.url) === state?.selection.listUrl && sender.tab.id === state?.sourceTab;
+  const source = sender => own(sender) && sameListRoute(sender.url, state?.selection.listUrl) && sender.tab.id === state?.sourceTab;
   const sameApp = url => JSON.stringify(pageIdentity(url)) === JSON.stringify(pageIdentity(state.selection.listUrl));
 
   async function save() {
@@ -46,8 +47,7 @@ export function createResolver(platform, controller) {
             active.intervened = true; state.running = false; state.error = interventionError(); return false;
           }
           // Firebase SPA may strip the resolve hash; compare origin+path+search.
-          const basis = value => { const url = new URL(value); url.hash = ''; return url.href; };
-          const safeList = basis(tab.url ?? '') === basis(active.url);
+          const safeList = sameListRoute(tab.url, active.url);
           const safeDetail = typeof active.resolvedUrl === 'string' && tab.url === active.resolvedUrl;
           if (tab.id !== active.tabId || (!safeList && !safeDetail)) throw new Error('unverified');
           await platform.close(active.tabId);
@@ -71,8 +71,7 @@ export function createResolver(platform, controller) {
       await platform.clearAlarm(active.token);
       const tab = await platform.getTab(active.tabId);
       const safeDetail = typeof active.resolvedUrl === 'string' && tab?.url === active.resolvedUrl;
-      const basis = value => { const url = new URL(value); url.hash = ''; return url.href; };
-      if (tab && (basis(tab.url ?? '') === basis(active.url) || safeDetail)) await platform.close(active.tabId);
+      if (tab && (sameListRoute(tab.url, active.url) || safeDetail)) await platform.close(active.tabId);
     } catch { /* Best effort: a temp tab that cannot be re-verified stays open and never blocks the batch. */ }
   }
   async function next() {
@@ -157,7 +156,10 @@ export function createResolver(platform, controller) {
       if (message.type === 'RESOLVE_SELECTION') {
         if (state?.running || state?.active) throw new Error('Resolution already active; inspect or cancel before retrying.');
         const selection = validateSelection(message.payload);
-        if (listUrl(sender.url) !== selection.listUrl || sender.url !== selection.listUrl) throw new Error('List source mismatch.');
+        if (!sameListRoute(sender.url, selection.listUrl)) {
+          log('resolve-selection:mismatch', { senderUrlTail: String(sender.url ?? '').slice(-60), listUrlTail: selection.listUrl.slice(-60) });
+          throw new Error('List source mismatch.');
+        }
         const queue = await controller.handle(envelope('GET_STATE'), manager);
         if (!queue.ok || queue.data.running || queue.data.active) throw new Error('Capture is active or unavailable.');
         state = { sourceTab: sender.tab.id, selection, running: true, results: selection.selected.map(index => ({ index, status: 'pending', error: null })), active: null, error: null };
@@ -183,10 +185,10 @@ export function createResolver(platform, controller) {
         let original;
         try { tab = await platform.getTab(active.tabId); original = await platform.getTab(state.sourceTab); }
         catch { state.running = false; state.error = { code: 'unsupported', message: 'Cannot query resolution/source tab; batch stopped.' }; return finish(state.error); }
-        // Firebase SPA strips the resolve hash after load; compare origin+path+search only.
-        const urlBasis = value => { const url = new URL(value); url.hash = ''; return url.href; };
-        if (!tab || urlBasis(tab.url ?? '') !== urlBasis(active.url) || takeover(active)) { active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
-        if (original?.url !== state.selection.listUrl) return finish({ code: 'unsupported', message: 'Original list route changed; select again.' });
+        // Firebase rewrites list query params after load; route identity (origin+path)
+        // is the stable basis, sameListRoute also strips the resolve hash.
+        if (!tab || !sameListRoute(tab.url, active.url) || takeover(active)) { active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result(); }
+        if (!sameListRoute(original?.url, state.selection.listUrl)) return finish({ code: 'unsupported', message: 'Original list route changed; select again.' });
         try {
           const checked = await send(state.sourceTab, envelope('CHECK_SELECTION', { snapshot: state.selection.snapshot, index: active.index }));
           if (!checked?.ok) return finish({ code: 'unsupported', message: 'Original list snapshot changed; select again.' });
@@ -195,8 +197,7 @@ export function createResolver(platform, controller) {
         if (!await save()) { await cleanup(); return result(); }
         try {
           const beforeClick = await platform.getTab(active.tabId);
-          const clickUrlBasis = value => { const url = new URL(value); url.hash = ''; return url.href; };
-          if (takeover(active) || !beforeClick || clickUrlBasis(beforeClick.url ?? '') !== clickUrlBasis(active.url)) {
+          if (takeover(active) || !beforeClick || !sameListRoute(beforeClick.url, active.url)) {
             active.intervened = true; state.running = false; state.error = interventionError(); await save(); return result();
           }
           const reply = await send(active.tabId, envelope('RESOLVE_ROW', { token: active.token, snapshot: state.selection.snapshot, index: active.index }));
@@ -224,7 +225,7 @@ export function createResolver(platform, controller) {
       state.active.resolvedUrl = url;
       if (!await save()) { await cleanup(); return result(); }
       const original = await platform.getTab(state.sourceTab);
-      if (original?.url !== state.selection.listUrl) return finish({ code: 'unsupported', message: 'Original list changed before resolution completed.' });
+      if (!sameListRoute(original?.url, state.selection.listUrl)) return finish({ code: 'unsupported', message: 'Original list changed before resolution completed.' });
       try {
         const checked = await send(state.sourceTab, envelope('CHECK_SELECTION', { snapshot: state.selection.snapshot, index: state.active.index }));
         if (!checked?.ok) return finish({ code: 'unsupported', message: 'Original list snapshot changed before resolution completed.' });

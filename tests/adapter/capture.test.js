@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { extractCapture, parseIssueUrl } from '../../src/adapter/firebase.js';
-import { validateCapture } from '../../src/domain/model.js';
+import { validateCapture, LIMITS } from '../../src/domain/model.js';
 import { element, stackDocument, makeDocument, ISSUE_URL, STACK } from './fake-dom.js';
 const NOW = '2026-11-16T07:00:00.000Z';
 const issue = parseIssueUrl(ISSUE_URL);
@@ -52,6 +52,31 @@ test('real Firebase console frames without "at" prefix are captured; icon ligatu
   const other = element('div', 'at other.Foo.bar(Foo.java:1)', { class: 'stack-trace' });
   document.body.append(other);
   assert.throws(() => extractCapture(document, issue, NOW), code('unsupported'));
+});
+
+test('full raw stack from the copy control wins over the collapsed DOM and is flagged', () => {
+  const { document } = stackDocument(ISSUE_URL, 'Collapsed visible frame only: at a.B.c(B.java:1)');
+  const full = ['Fatal Exception: java.lang.UnsupportedOperationException: TIME_SCREEN Crash',
+    '       at app.lawnchair.feed.FeedOverlayManager.openQuickTool(FeedOverlayManager.kt:521)',
+    '       at androidx.compose.ui.node.Node.dispatchMainEventPass(Node.kt:431)',
+    '',
+    'arch_disk_io_2:',
+    '       at jdk.internal.misc.Unsafe.park(Unsafe.java)',
+    '       at java.lang.Thread.run(Thread.java:1571)'].join('\n');
+  const capture = extractCapture(document, issue, NOW, full);
+  assert.equal(capture.stacktrace, full, 'the raw dump must be used verbatim, not the collapsed DOM text');
+  assert.equal(capture.completeness, 'unknown');
+  assert.ok(capture.warnings.some(w => w.includes('Copy stack trace')), 'source of the raw dump must be disclosed');
+  assert.ok(!capture.warnings.some(w => w.includes('collapsed visible')), 'collapsed-DOM warning must not apply');
+  assert.deepEqual(validateCapture(capture), capture);
+  // A bogus fullStack (no frames) falls back to the DOM path instead of exporting garbage.
+  const fallback = extractCapture(document, issue, NOW, 'not a stack at all');
+  assert.match(fallback.stacktrace, /Collapsed visible frame/);
+  // Over-long raw dumps are truncated with a warning.
+  const long = extractCapture(document, issue, NOW, 'at a.B.c(B.java:1)\n' + 'x'.repeat(LIMITS.maxStackLength + 10));
+  assert.equal(long.stacktrace.length, LIMITS.maxStackLength);
+  assert.equal(long.completeness, 'partial');
+  assert.ok(long.warnings.some(w => w.includes('truncated')));
 });
 
 test('semantic labelled region fallback and narrow metadata dl support', () => {

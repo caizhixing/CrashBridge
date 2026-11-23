@@ -90,6 +90,7 @@ export function mountContent(environment = {}) {
     finally { queryInFlight = false; }
   };
   let navigationInvalidated = false;
+  let extracting = false;
   if (!parseCaptureJob(window.location.href) && !resolveToken && parseIssueUrl(window.location.href)) void queryActiveJob();
   let disposed = false;
   let scheduled = false;
@@ -150,13 +151,55 @@ export function mountContent(environment = {}) {
       status.textContent = '等待页面加载完成（最多 60 秒）';
       return;
     }
-    try { debug('extract:start'); void submit(extractCapture(document, job.issue, now()), null); }
-    catch (error) {
-      debug('extract:error', { code: error?.code ?? 'unknown', message: error?.message ?? 'unknown' });
-      pendingError = { code: ['login-required', 'missing-stack', 'unsupported'].includes(error.code) ? error.code : 'unsupported', message: error.message };
-      status.textContent = `等待详情 DOM：${pendingError.code}（最多 60 秒）`;
-      if (pendingError.code === 'login-required') void submit(null, pendingError);
+    if (extracting) return;
+    extracting = true;
+    void (async () => {
+      let fullStack = null;
+      try {
+        fullStack = await captureFullStackViaCopy();
+        debug('copy-capture', { obtained: Boolean(fullStack), len: fullStack?.length ?? 0 });
+      } catch (error) { debug('copy-capture:error', { message: error?.message ?? 'unknown' }); }
+      try {
+        debug('extract:start', { viaCopy: Boolean(fullStack) });
+        void submit(extractCapture(document, job.issue, now(), fullStack), null);
+      } catch (error) {
+        debug('extract:error', { code: error?.code ?? 'unknown', message: error?.message ?? 'unknown' });
+        pendingError = { code: ['login-required', 'missing-stack', 'unsupported'].includes(error.code) ? error.code : 'unsupported', message: error.message };
+        status.textContent = `等待详情 DOM：${pendingError.code}（最多 60 秒）`;
+        if (pendingError.code === 'login-required') void submit(null, pendingError);
+      } finally { extracting = false; }
+    })();
+  }
+
+  const waitFor = async (check, attempts) => {
+    for (let i = 0; i < attempts; i++) {
+      if (check()) return true;
+      await new Promise(resolve => setTimer(resolve, 50));
     }
+    return check();
+  };
+
+  /** Click the page's own "Copy stack trace" control; a main-world helper captures the raw text. */
+  async function captureFullStackViaCopy() {
+    const button = document.querySelector('[aria-label="Copy stack trace"]');
+    if (!button) return null;
+    const root = document.documentElement;
+    root.removeAttribute('data-crashbridge-stack');
+    if (!document.querySelector('script[data-crashbridge-injected]') && root.getAttribute('data-crashbridge-stack-armed') !== '1') {
+      const getURL = runtime?.getURL ?? globalThis.chrome?.runtime?.getURL;
+      if (typeof getURL !== 'function') return null;
+      const injector = document.createElement('script');
+      injector.src = getURL('src/content/copy-capture.js');
+      injector.async = true;
+      injector.setAttribute('data-crashbridge-injected', '1');
+      (document.head ?? document.documentElement).append(injector);
+    }
+    if (!await waitFor(() => root.getAttribute('data-crashbridge-stack-armed') === '1', 20)) return null;
+    button.click();
+    if (!await waitFor(() => root.getAttribute('data-crashbridge-stack') === 'ready', 40)) return null;
+    const host = document.getElementById('crashbridge-stack-capture');
+    if (!host?.textContent) return null;
+    try { return JSON.parse(host.textContent); } catch { return null; }
   }
 
   function reconcile() {
@@ -338,7 +381,10 @@ export function mountContent(environment = {}) {
             catch { /* The background deadline reports a changed page without clicking. */ }
           }
         });
-      } catch { respond({ ok: false }); }
+      } catch (error) {
+        debug('instruction:reject', { type: message.type, message: error?.message ?? 'unknown', hasToken: Boolean(resolveToken), visibility: document.visibilityState, intervened: resolverIntervened, attempts });
+        respond({ ok: false });
+      }
     };
     attempt();
     return true;

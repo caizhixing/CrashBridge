@@ -138,8 +138,8 @@ function field(document, labels) {
   return values.length === 1 ? values[0] : null;
 }
 
-/** @param {Document} document @param {IssueRef} issue @param {string} now */
-export function extractCapture(document, issue, now) {
+/** @param {Document} document @param {IssueRef} issue @param {string} now @param {string|null} [fullStack] */
+export function extractCapture(document, issue, now, fullStack = null) {
   const location = document.location?.href ?? document.URL;
   if (/^https:\/\/accounts\.google\.com\//.test(location ?? '') || document.querySelector('form[action^="https://accounts.google.com/"]')) {
     throw failure('login-required', 'Firebase sign-in is required.');
@@ -155,24 +155,38 @@ export function extractCapture(document, issue, now) {
     if (!identity || identity.projectId !== actual.projectId || identity.appId !== actual.appId || identity.issueId !== actual.issueId) throw failure('unsupported', 'Ambiguous page identity.');
   }
   if (!Number.isFinite(Date.parse(now))) throw failure('unsupported', 'Invalid capture timestamp.');
-  let regions = stackRegions(document);
-  if (regions.length > 1) {
-    // During SPA rendering sibling regions can coexist briefly; the one containing
-    // actual frames is the stack region — exactly one is required, zero or many stays ambiguous.
-    const withFrames = regions.filter(region => hasFrame(renderedText(document, region).trim()));
-    if (withFrames.length === 1) regions = withFrames;
+  // The page's own "Copy stack trace" control exposes the full raw thread dump; it is
+  // authoritative over the collapsed visible DOM when the content script obtained it.
+  const fullStackText = typeof fullStack === 'string' ? fullStack.trim() : '';
+  let stack;
+  let partial = false;
+  let warnings = ['Only the currently displayed representative event is captured; latest event and completeness are not verified.'];
+  if (fullStackText && hasFrame(fullStackText)) {
+    stack = fullStackText;
+    warnings.push('Stack captured from the page "Copy stack trace" control (full raw thread dump).');
+  } else {
+    let regions = stackRegions(document);
+    if (regions.length > 1) {
+      // During SPA rendering sibling regions can coexist briefly; the one containing
+      // actual frames is the stack region — exactly one is required, zero or many stays ambiguous.
+      const withFrames = regions.filter(region => hasFrame(renderedText(document, region).trim()));
+      if (withFrames.length === 1) regions = withFrames;
+    }
+    if (regions.length !== 1) throw failure('unsupported', 'No unique supported stack trace region was found.');
+    const region = regions[0];
+    const blocks = [...region.querySelectorAll('pre, [role="code"]')].filter(block => visible(document, block));
+    // A single nested code block is acceptable; concatenating unknown independent blocks is not.
+    if (blocks.length > 1) throw failure('unsupported', 'Multiple stack blocks cannot be safely identified as one event.');
+    stack = renderedText(document, blocks[0] ?? region).trim();
+    if (!hasFrame(stack)) throw failure('missing-stack', 'No rendered Android stack frames were found.');
+    partial = Boolean(region.querySelector('[aria-expanded="false"], [aria-busy="true"]'));
+    warnings = ['Real Firebase console DOM compatibility has not been verified.', ...warnings];
+    if (partial) warnings.push('Only the collapsed visible stack was captured; expand or use "Copy stack trace" for the full thread dump.');
   }
-  if (regions.length !== 1) throw failure('unsupported', 'No unique supported stack trace region was found.');
-  const region = regions[0];
-  const blocks = [...region.querySelectorAll('pre, [role="code"]')].filter(block => visible(document, block));
-  // A single nested code block is acceptable; concatenating unknown independent blocks is not.
-  if (blocks.length > 1) throw failure('unsupported', 'Multiple stack blocks cannot be safely identified as one event.');
-  const stack = renderedText(document, blocks[0] ?? region).trim();
-  if (!hasFrame(stack)) throw failure('missing-stack', 'No rendered Android stack frames were found.');
-  const partial = stack.length > LIMITS.maxStackLength || Boolean(region.querySelector('[aria-expanded="false"], [aria-busy="true"]'));
-  const warnings = ['Real Firebase console DOM compatibility has not been verified.', 'Only the currently displayed representative event is captured; latest event and completeness are not verified.'];
-  if (stack.length > LIMITS.maxStackLength) warnings.push('Stack trace truncated to 200000 characters.');
-  if (partial) warnings.push('Only partially rendered or truncated stack content is available.');
+  if (stack.length > LIMITS.maxStackLength) {
+    partial = true;
+    warnings.push('Stack trace truncated to 200000 characters.');
+  }
   const eventId = new URL(actual.url).searchParams.get('eventId');
   const requestedEventId = new URL(expected.url).searchParams.get('eventId');
   if (requestedEventId && requestedEventId !== eventId) throw failure('unsupported', 'The displayed event URL does not match the requested event.');

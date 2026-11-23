@@ -55,7 +55,7 @@ test('serial fresh list tabs resolve actual URL through real queue and composite
 
 test('sender/frame/token/list/payload forgery and capture overlap are rejected before opening', async () => {
   const f = setup(); await f.resolver.recover();
-  for (const forged of [{ ...sender, id: 'evil' }, { ...sender, frameId: 1 }, { ...sender, frameId: undefined }, { ...sender, url: 'https://evil.test/' }, { ...sender, url: list + '?other=1' }]) assert.equal((await f.resolver.handle(message('RESOLVE_SELECTION', selection), forged)).ok, false);
+  for (const forged of [{ ...sender, id: 'evil' }, { ...sender, frameId: 1 }, { ...sender, frameId: undefined }, { ...sender, url: 'https://evil.test/' }, { ...sender, url: list.replace('synthetic-project', 'other-project') }]) assert.equal((await f.resolver.handle(message('RESOLVE_SELECTION', selection), forged)).ok, false);
   assert.equal((await f.start({ ...selection, junk: 'x'.repeat(300000) })).ok, false);
   assert.equal((await f.resolver.handle({ ...message('RESOLVE_SELECTION', selection), version: 2 }, sender)).ok, false);
   assert.equal((await f.resolver.handle(message('UNKNOWN'), sender)).ok, false);
@@ -74,7 +74,17 @@ test('snapshot/content failures remain visible and advance only after verified c
     assert.equal((await f.get()).data.results[0].error.code, 'unsupported'); assert.equal(f.queue.calls.opens.length, 2);
     await f.resolver.handle(message('CANCEL_RESOLUTION'), sender);
   }
-  const f = setup(); await f.start(); f.queue.tabs.set(7, { id: 7, url: list + '?changed=1' });
+  // Firebase rewrites query params after load (Chromium sender URLs lag behind); the
+  // same route with different params is still the same source list and resolves fine.
+  const params = setup(); await params.start(); const paramTab = params.current().tabId;
+  params.queue.tabs.set(paramTab, { id: paramTab, url: list + '?state=open&sort=eventCount', active: false });
+  await params.ready();
+  const paramDetail = issue('params-tolerant').url;
+  params.queue.tabs.set(paramTab, { id: paramTab, url: paramDetail, active: false });
+  await params.resolver.updated(paramTab, paramDetail);
+  assert.equal((await params.get()).data.results[0].status, 'succeeded');
+  // A different project/app route is a real source change and must stop the batch.
+  const f = setup(); await f.start(); f.queue.tabs.set(7, { id: 7, url: list.replace('synthetic-project', 'other-project') });
   await f.ready(); assert.match((await f.get()).data.results[0].error.message, /route changed/);
 });
 

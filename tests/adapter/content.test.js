@@ -97,6 +97,7 @@ test('capture still submits from a detail document with a legacy job hash', asyn
 test('missing stacks wait until deadline and fail visibly without empty success', async () => {
   const { document } = stackDocument(JOB_URL, 'Exception only'); const environment = browserEnvironment(document);
   const app = mountContent(environment);
+  await flush(); await flush();
   assert.match(root(document).textContent, /missing-stack/);
   const timeout = [...environment.timers.values()][0]; timeout.callback(); await flush();
   assert.equal(environment.sent[0].payload.capture, null); assert.equal(environment.sent[0].payload.error.code, 'missing-stack');
@@ -134,16 +135,51 @@ test('capture survives Firebase stripping the query token by re-querying the bac
   app.dispose();
 });
 
+test('copy-control orchestration: armed helper plus button click yields the raw dump', async () => {
+  // The visible DOM is collapsed (no frames) so capture depends entirely on the copy control.
+  const { document } = stackDocument(ISSUE_URL, 'Exception only, no frames');
+  const environment = browserEnvironment(document);
+  environment.setTimeout = (callback, ms) => { if (ms === 50) queueMicrotask(callback); return 1; };
+  environment.clearTimeout = () => {};
+  environment.runtime.sendMessage = async message => {
+    environment.sent.push(message);
+    if (message.type === 'QUERY_ACTIVE_JOB') return { ok: true, data: { jobId: UUID, issue: parseIssueUrl(ISSUE_URL) } };
+    return { ok: true, data: {} };
+  };
+  // Simulate the main-world helper already armed (injection is skipped when armed).
+  document.documentElement.setAttribute('data-crashbridge-stack-armed', '1');
+  const RAW = 'Fatal Exception: java.lang.IllegalStateException\n       at a.B.c(B.java:1)\n       at java.lang.Thread.run(Thread.java:1571)';
+  const button = element('button', '', { 'aria-label': 'Copy stack trace' });
+  button.click = () => {
+    const host = element('script', JSON.stringify(RAW));
+    host.setAttribute('id', 'crashbridge-stack-capture');
+    host.setAttribute('type', 'application/json');
+    document.body.append(host);
+    document.documentElement.setAttribute('data-crashbridge-stack', 'ready');
+  };
+  document.body.append(button);
+  const app = mountContent(environment);
+  for (let i = 0; i < 30 && !environment.sent.some(m => m.type === 'CAPTURE_RESULT'); i++) await flush();
+  const captureMessage = environment.sent.find(m => m.type === 'CAPTURE_RESULT');
+  assert.ok(captureMessage, 'CAPTURE_RESULT must be sent via the copy control');
+  const payload = parseMessage(captureMessage).payload;
+  assert.equal(payload.capture.stacktrace, RAW, 'raw copy-control dump must be the stacktrace');
+  assert.ok(payload.capture.warnings.some(w => w.includes('Copy stack trace')));
+  assert.ok(!document.querySelector('script[data-crashbridge-injected]'), 'armed helper must not be re-injected');
+  app.dispose();
+});
+
 test('unsupported DOM deadline and sign-in failure preserve error codes; messaging rejection visible', async () => {
   const unsupported = browserEnvironment(makeDocument(JOB_URL)); const a = mountContent(unsupported);
+  await flush(); await flush();
   [...unsupported.timers.values()][0].callback(); await flush();
   assert.equal(unsupported.sent[0].payload.error.code, 'unsupported'); a.dispose();
   const document = makeDocument(JOB_URL); document.body.append(element('form', '', { action: 'https://accounts.google.com/signin' }));
-  const auth = browserEnvironment(document); const b = mountContent(auth); await flush();
+  const auth = browserEnvironment(document); const b = mountContent(auth); await flush(); await flush();
   assert.equal(auth.sent[0].payload.error.code, 'login-required'); b.dispose();
   const rejected = browserEnvironment(stackDocument(JOB_URL).document);
   rejected.runtime.sendMessage = async () => { throw new Error('Disconnected'); };
-  const c = mountContent(rejected); await flush();
+  const c = mountContent(rejected); await flush(); await flush();
   assert.match(root(rejected.document).textContent, /未发送/); c.dispose();
 });
 
@@ -152,6 +188,7 @@ test('a changed job fails conservatively and an old in-flight reply cannot overw
   let release;
   environment.runtime.sendMessage = message => { environment.sent.push(message); return environment.sent.length === 1 ? new Promise(resolve => { release = resolve; }) : Promise.resolve({ ok: false, error: { code: 'storage-failed' } }); };
   const app = mountContent(environment);
+  await flush(); await flush();
   const next = JOB_URL.replace(UUID, '87654321-4321-4321-8321-cba987654321');
   environment.window.location.href = next; document.location.href = next;
   environment.window.dispatchEvent({ type: 'hashchange' }); await flush();
@@ -199,6 +236,7 @@ for (const [name, nextUrl] of [
   test(`${name} navigation never labels retained A DOM as B, even after B DOM arrives`, async () => {
     const { document, pre } = stackDocument(JOB_URL, `${STACK}\nSYNTHETIC_A_ONLY`);
     const environment = browserEnvironment(document); const app = mountContent(environment);
+    await flush(); await flush();
     assert.equal(environment.sent[0].payload.capture.stacktrace, `${STACK}\nSYNTHETIC_A_ONLY`);
     await navigate(environment, nextUrl);
     assert.equal(environment.sent.length, 2);
@@ -212,6 +250,7 @@ for (const [name, nextUrl] of [
     // Normal background scheduling opens a new document/tab per job and still works.
     const fresh = browserEnvironment(stackDocument(nextUrl, `${STACK}\nSYNTHETIC_B_ONLY`).document);
     const nextApp = mountContent(fresh);
+    await flush(); await flush();
     assert.equal(fresh.sent.length, 1);
     assert.equal(parseMessage(fresh.sent[0]).payload.capture.stacktrace, `${STACK}\nSYNTHETIC_B_ONLY`);
     nextApp.dispose();
