@@ -122,6 +122,27 @@ function stackRegions(document) {
   return rendered.filter(region => !rendered.some(other => other !== region && other.contains(region)));
 }
 
+/** Firebase renders metadata as header-item chips: hidden label + visible value. */
+function headerItems(document) {
+  const items = new Map();
+  for (const item of document.querySelectorAll('.header-item')) {
+    const label = (item.querySelector('.cdk-visually-hidden')?.textContent ?? '').trim().replace(/:$/, '').toLowerCase();
+    const value = (item.querySelector('.header-item-text')?.textContent ?? '').trim();
+    if (label && value) items.set(label, value);
+  }
+  return items;
+}
+
+/** Crash/user totals from the bolded counters inside the details wrapper. */
+function detailTotals(document) {
+  const wrapper = document.querySelector('[data-test-id="issue-details-wrapper"]');
+  const bolds = wrapper ? [...wrapper.querySelectorAll('b')].map(b => (b.textContent || '').trim()) : [];
+  return {
+    events: bolds.find(text => /crash\s+event/i.test(text)) ?? null,
+    users: bolds.find(text => /\d+\s+user/i.test(text)) ?? null,
+  };
+}
+
 /** Narrow dl semantics only; missing or ambiguous values remain null. @param {Document} document @param {string[]} labels */
 function field(document, labels) {
   const values = [];
@@ -192,13 +213,22 @@ export function extractCapture(document, issue, now, fullStack = null) {
   if (requestedEventId && requestedEventId !== eventId) throw failure('unsupported', 'The displayed event URL does not match the requested event.');
   const labelledEventId = field(document, ['event id']);
   if (eventId && labelledEventId && eventId !== labelledEventId) throw failure('unsupported', 'The displayed event metadata conflicts with the URL.');
+  const headers = headerItems(document);
+  const totals = detailTotals(document);
+  const appVersionRaw = headers.get('app version') ?? field(document, ['app version']);
+  const osRaw = headers.get('os version: android') ?? headers.get('os version');
   return {
     issue: { ...expected, title: issue.title },
     event: { eventId, identitySource: eventId ? 'event-id' : 'unavailable' },
-    capturedAt: new Date(now).toISOString(), eventTimestamp: field(document, ['event timestamp', 'event time']),
+    capturedAt: new Date(now).toISOString(),
+    eventTimestamp: headers.get('date') ?? field(document, ['event timestamp', 'event time']),
     selection: 'currently-displayed', source: 'rendered-dom', completeness: partial ? 'partial' : 'unknown',
-    stacktrace: stack.slice(0, LIMITS.maxStackLength), appVersion: field(document, ['app version']), versionCode: field(document, ['version code', 'build version']),
-    osVersion: field(document, ['os version', 'android version']), deviceModel: field(document, ['device model']),
-    statistics: { events: field(document, ['events']), users: field(document, ['users']), timeRange: field(document, ['time range']) }, warnings,
+    stacktrace: stack.slice(0, LIMITS.maxStackLength),
+    appVersion: appVersionRaw,
+    versionCode: appVersionRaw?.match(/\((\d+)\)\s*$/)?.[1] ?? field(document, ['version code', 'build version']),
+    osVersion: osRaw ? `android ${osRaw.replace(/^android\s+/i, '')}` : field(document, ['os version', 'android version']),
+    deviceModel: headers.get('model') ?? field(document, ['device model']),
+    statistics: { events: totals.events ?? field(document, ['events']), users: totals.users ?? field(document, ['users']), timeRange: field(document, ['time range']) },
+    warnings,
   };
 }

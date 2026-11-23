@@ -79,6 +79,42 @@ test('full raw stack from the copy control wins over the collapsed DOM and is fl
   assert.ok(long.warnings.some(w => w.includes('truncated')));
 });
 
+test('real Firebase header-item chips supply metadata: version, os, model, date, totals', () => {
+  const { document } = stackDocument(ISSUE_URL);
+  // Mirrors the real session-card header: .header-item > (mat-icon)? + span.cdk-visually-hidden + span.header-item-text
+  const card = element('div', '', { class: 'session-card' });
+  const chip = (cls, label, value) => {
+    const item = element('div', '', { class: `header-item ${cls}` });
+    item.append(element('span', label, { class: 'cdk-visually-hidden' }));
+    item.append(element('span', value, { class: 'header-item-text' }));
+    return item;
+  };
+  card.append(
+    chip('session-build-version', 'App version:', '1.0.7 (10)'),
+    chip('session-os', 'OS version: android', '16'),
+    chip('session-device', 'Model:', 'SM-M166S'),
+    chip('session-time', 'Date:', 'Nov 17, 2026, 5:46:56 PM'),
+  );
+  const wrapper = element('div', '', { 'data-test-id': 'issue-details-wrapper' });
+  wrapper.append(element('b', '1 crash event'), element('b', '1 user'));
+  document.body.append(card, wrapper);
+  const capture = extractCapture(document, issue, NOW);
+  assert.equal(capture.appVersion, '1.0.7 (10)');
+  assert.equal(capture.versionCode, '10');
+  assert.equal(capture.osVersion, 'android 16');
+  assert.equal(capture.deviceModel, 'SM-M166S');
+  assert.equal(capture.eventTimestamp, 'Nov 17, 2026, 5:46:56 PM');
+  assert.equal(capture.statistics.events, '1 crash event');
+  assert.equal(capture.statistics.users, '1 user');
+  assert.deepEqual(validateCapture(capture), capture);
+  // The dl fallback still works when chips are absent.
+  const dl = element('dl');
+  dl.append(element('dt', 'App version'), element('dd', '2.0.0 (20)'));
+  document.body.append(dl);
+  const fallback = extractCapture(document, issue, NOW);
+  assert.equal(fallback.appVersion, '1.0.7 (10)', 'chips take priority over dl');
+});
+
 test('semantic labelled region fallback and narrow metadata dl support', () => {
   const document = makeDocument(ISSUE_URL);
   const heading = element('h2', 'Stack trace', { id: 'trace-heading' });
