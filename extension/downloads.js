@@ -18,6 +18,12 @@ export function createDownloader(platform) {
         const isJson = format === 'json';
         const blob = new Blob([isJson ? snapshot.json : snapshot.markdown], { type: isJson ? 'application/json;charset=utf-8' : 'text/markdown;charset=utf-8' });
         objectUrl = platform.createObjectURL(blob);
+        const now = new Date();
+        const pad = value => String(value).padStart(2, '0');
+        const stamp = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+        const issues = snapshot.bundle?.issues ?? [];
+        const identity = issues.length === 1 ? (issues[0]?.issue?.issueId ?? 'unknown') : `${issues.length}issues`;
+        const filename = `${stamp}_${identity}.${isJson ? 'json' : 'md'}`;
         onStatus('等待浏览器下载完成；开始请求不代表已保存。');
         await new Promise((resolve, reject) => {
           let id = null;
@@ -33,7 +39,7 @@ export function createDownloader(platform) {
             else if (delta.id === id) settle(delta.state.current);
           };
           platform.downloads.onChanged.addListener(listener);
-          Promise.resolve().then(() => platform.downloads.download({ url: objectUrl, filename: `crashbridge-export.${isJson ? 'json' : 'md'}`, saveAs: true, conflictAction: 'uniquify' })).then(async downloadId => {
+          Promise.resolve().then(() => platform.downloads.download({ url: objectUrl, filename, saveAs: true, conflictAction: 'uniquify' })).then(async downloadId => {
             if (!Number.isInteger(downloadId) || downloadId < 0) throw new Error(DOWNLOAD_FAILURE);
             id = downloadId;
             if (early.has(id)) settle(early.get(id));

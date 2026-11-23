@@ -36,7 +36,7 @@ for (const format of ['json', 'markdown']) test(`${format}: only matching onChan
   assert.equal(settled, false);
   assert.equal(h.downloader.active, true);
   assert.equal(h.requests[0].saveAs, true);
-  assert.equal(h.requests[0].filename, format === 'json' ? 'crashbridge-export.json' : 'crashbridge-export.md');
+  assert.match(h.requests[0].filename, new RegExp(`^\\d{8}_\\d{6}_0issues\\.${format === 'json' ? 'json' : 'md'}$`), 'timestamped filename');
   assert.equal(await h.blobs[0].text(), snapshot[format]);
   assert.match(h.blobs[0].type, format === 'json' ? /application\/json/ : /text\/markdown/);
   h.emit({ id: 99, state: { current: 'complete' } });
@@ -60,6 +60,21 @@ test('accepted download/search complete alone never claims success without compl
   assert.equal(settled, false);
   h.emit({ id: 7, state: { current: 'complete' } });
   await run;
+});
+
+test('single-issue export names the file with the issue ID; multiple issues use a count', async () => {
+  for (const [issues, suffix] of [
+    [[{ issue: { issueId: 'abc123' } }], 'abc123'],
+    [[{ issue: { issueId: 'a' } }, { issue: { issueId: 'b' } }], '2issues'],
+  ]) {
+    const h = harness();
+    const one = { ...snapshot, bundle: { issues } };
+    const run = h.downloader.download('markdown', one, () => {});
+    await nextTurn();
+    assert.match(h.requests[0].filename, new RegExp(`^\\d{8}_\\d{6}_${suffix}\\.md$`));
+    h.emit({ id: 7, state: { current: 'complete' } });
+    await run;
+  }
 });
 
 for (const options of [{ reject: true }, { early: 'interrupted' }, { state: 'interrupted' }, { searchReject: true }, { empty: true }]) test(`failure ${JSON.stringify(options)} retains input and permits retry without leaking private diagnostics`, async () => {
