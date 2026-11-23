@@ -5,6 +5,7 @@
   "description": "在本机整理 Crashlytics 问题、预览并导出日志。真实控制台兼容性尚未验证。",
   "permissions": ["storage", "alarms", "downloads"],
   "host_permissions": ["https://console.firebase.google.com/*"],
+  "icons": { "16": "icon-16.png", "32": "icon-32.png", "48": "icon-48.png", "128": "icon-128.png" },
   "background": { "service_worker": "src/background/service-worker.js", "type": "module" },
   "action": { "default_title": "打开 CrashBridge 管理页" },
   "content_scripts": [{

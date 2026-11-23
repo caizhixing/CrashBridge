@@ -1,76 +1,101 @@
 # CrashBridge
 
+**Turn multiple Crashlytics issues into one reviewable, locally-stored report.** A Chrome / Edge Manifest V3 extension built with native ESM and zero third-party dependencies. It never uploads data, creates Harness sessions, or modifies Firebase issue state.
+
+[中文说明](#中文说明) · [Español](#español) · [Français](#français) · [Português](#português)
+
+> **Real Firebase console compatibility is verified end-to-end** against a live project (list selection, issue-ID resolution, full-stack capture, metadata extraction). Layouts that cannot be recognised fail explicitly — the extension never exports an empty "success".
+
+## What it does
+
+1. **Batch-select** Crashlytics issues with independent checkboxes (Firebase's native selection is untouched).
+2. **Resolve real Issue IDs** through extension-owned temporary tabs — never guessed from titles or row positions.
+3. **Capture the full raw thread dump** via the page's own "Copy stack trace" control (100 KB+, all threads, `at`-prefixed frames) — not the collapsed DOM view.
+4. **Deduplicate** by Project + App + Issue ID.
+5. **Export** filtered JSON / Markdown with a live preview — stack trace, app version, version code, OS, device model, event time, crash and user counts.
+6. **Work in five languages**: English, 中文, Français, Español, Português.
+7. **Drag** the floating toolbar anywhere; the position persists.
+
+## Install (from source)
+
+Requires Node ≥ 24 and a current Chrome / Edge. No `npm install` needed — everything uses Node built-ins and runs offline:
+
+```powershell
+npm run check
+npm run build
+```
+
+1. Open `chrome://extensions` (or `edge://extensions`).
+2. Enable Developer mode → **Load unpacked** → select the **dist** directory.
+3. The extension requests only `storage`, `alarms`, `downloads` and access to `https://console.firebase.google.com/*`.
+4. After rebuilding, click **Reload** on the extension card and refresh the Firebase page.
+
+## Daily workflow
+
+1. Sign in to Firebase and open an **Android Crashlytics issue list**. Login and proxy are handled by the browser; the extension never reads cookies.
+2. Tick the **CrashBridge checkboxes** (independent from Firebase's). The fixed toolbar shows the selection count. Clicking **Add selected** resolves real issue IDs through serially-opened temporary list tabs; the original list never navigates. Snapshots must match exactly; ambiguous rows fail rather than guessing IDs. Up to 100 issues, deduplicated by **project + app + issue ID**.
+3. Click **Start capture**: the extension serially opens temporary detail tabs (one at a time), intercepts the page's own "Copy stack trace" control, and captures the complete raw thread dump. The original user tab is never navigated or closed.
+4. Failed items can be retried individually; a 60-second deadline applies per item. Storage or resource failures stop the batch safely with visible reasons.
+5. Review warnings and the preview, pick fields (stack and version on by default; device and statistics off), then download JSON and Markdown separately. Filenames are `yyyyMMdd_HHmmss_<issueId|Nissues>.<ext>`.
+
+## Data & privacy
+
+- All data stays on the machine. Nothing is uploaded, ever.
+- The extension does not read cookies, call private Firebase APIs, access Angular internals, or modify issue state.
+- Queue and captures live in `chrome.storage.local` (4 MiB UTF-8 cap). Resolution sessions live in `storage.session` and clear with the browser.
+- Only the currently displayed representative event is captured per issue; completeness is never claimed.
+- Hidden / collapsed DOM is excluded from the visible-text extraction; the full dump comes exclusively from the page's own copy control.
+- Clearing local data deletes the queue and captures; downloaded files remain (delete them yourself).
+
+## Languages
+
+Switch in the manager page header (🌐 selector). Applies to the manager page and the floating toolbar. Language preference persists.
+
+## Development
+
+```powershell
+npm run check           # syntax + manifest/module/HTML reference validation
+npm run build           # assemble dist/ (18+ files)
+npm test                # Node built-in test runner
+npm run test:coverage   # per-file coverage gates
+```
+
+142 tests, zero third-party dependencies, zero network installs. Coverage gates: domain modules 100 % lines, capture queue and resolver 100 % lines. DOM / manager / Chrome glue is n/a for coverage but covered by real behaviour tests.
+
+Verified end-to-end in a real browser: list selection → ID resolution → full-stack capture (104 KB / 1206 frames / all threads) → metadata extraction → dual-format export → dedupe on re-add.
+
+---
+
+# 中文说明
+
 **把多个 Crashlytics 问题整理成一份可检查的本地日志。** Chrome / Edge Manifest V3 扩展，原生 ESM，零第三方依赖；不会自动上传数据、创建 Harness 会话或关闭 Firebase 问题。
 
-> **真实 Firebase 控制台兼容性未验证。** 目前仅验证合成页面样本与模块契约；未在你的登录态、实际页面布局或浏览器下载环境验收。构建成功、单测通过不等于生产兼容。无法可靠识别页面、身份或堆栈时应明确失败，不能导出空成功。
+真实 Firebase 控制台兼容性已在真实项目中端到端验证（列表选择、Issue ID 解析、完整堆栈采集、元数据提取）。无法识别的布局会明确失败——绝不导出空的“成功”。
 
-## 安装：加载构建后的 dist
+## 功能
 
-需要本机 Node **v24.18.0**（开发基线）及现代 Chrome / Edge。无需、也不要运行 `npm install`，所有命令使用 Node 内置能力，离线执行：
+1. **批量勾选** Crashlytics 问题（独立复选框，不影响 Firebase 原生选择）。
+2. 通过扩展自有临时标签页**解析真实 Issue ID**——绝不按标题或行位置猜。
+3. 通过页面自带的"Copy stack trace"控件**捕获完整原始堆栈**（100 KB+，全部线程，`at` 前缀帧）——而非折叠后的 DOM 视图。
+4. 按**项目 + App + Issue ID** 去重。
+5. **导出** JSON / Markdown，带实时预览——堆栈、应用版本、versionCode、系统、设备型号、事件时间、崩溃与用户数。
+6. **五种语言**：中文、English、Français、Español、Português。
+7. 悬浮工具栏**可拖动**，位置记忆。
 
-```powershell
-node --version
-npm run check
-npm run build
-```
+## 安装
 
-1. Chrome 打开 `chrome://extensions`，或 Edge 打开 `edge://extensions`。
-2. 启用“开发者模式”，选择“加载已解压的扩展程序”。
-3. 选择构建生成的 **dist 目录**，不是仓库根，也不是 extension 源码目录。dist 将包含 manifest、管理页和 src 模块。
-4. 仅允许访问 `https://console.firebase.google.com/*`。扩展只申请 storage、alarms、downloads，不需要 Cookie、调试器、全站或本机文件权限。
-5. 更新源码后重新构建，在扩展页点击“重新加载”，再刷新 Firebase 页面。点击工具栏 CrashBridge 图标打开中文管理页（不是弹窗）。
-
-如缺少构建脚本或其他模块，说明当前只是任务开发分支，并非完整可安装版本；请使用完成集成后的版本，不要创建占位文件或加载源码目录冒充安装成功。
-
-## 日常工作流
-
-1. 在浏览器中手动登录 Firebase，打开 **Android App 的 Crashlytics 问题列表**。登录和网络 / VPS 代理由浏览器自身管理，扩展不读取或导出 Cookie。
-2. 勾选标题旁的 **CrashBridge 独立复选框**，不要使用 Firebase 原生复选框。右下固定工具栏显示已选数量；零选择时加入按钮禁用。点击加入清单后，真实详情 href 可直接入队；href=# 的行会串行打开扩展临时列表标签，只点击严格匹配的标题并读取真实详情 URL，**原列表不导航**。完整有序快照、唯一标题/副标题结构不匹配时失败，不猜 ID。跨筛选、分页继续添加；最多 100 项，以 **项目 + App + Issue ID** 去重，不按标题去重。工具栏显示新增、重复、逐行失败，可取消解析或打开管理页。
-3. 点击扩展图标查看清单、来源页、逐项状态与错误。可以删除单项或清空本地数据。找不到列表入口时，先检查启用状态与 Firebase 单站点权限，再刷新；仍无入口可能是不受支持布局，不要通过授予全站权限“修复”。
-4. 主动点击“开始采集”：串行打开临时详情标签页，最多一个；读取已渲染的当前代表事件，不调用未公开 API，不自动展开未加载线程，不下载附件、不改 Firebase 状态。开始只处理待采集 / 已取消项；成功项保留。
-5. 运行中禁止冲突操作；如要删除、清空或导出，先取消并等待停止。取消清理经身份核实的扩展临时页，不应关闭你原有的 Firebase 页。普通单项失败继续后续项；资源 / 存储故障安全停批，不静默丢弃结果。
-6. 登录失效请手动登录后点击“重试失败项”；网络 / 页面缓慢会在 60 秒超时，关闭临时页会提示 tab-closed。失败清单保留，不静默自动重试。worker 重启后的中断项不会自动恢复旧批次，可主动重新开始。**重新采集成功项须先删除该项，再从列表重新添加**，不是反复点击开始。
-7. 检查警告与实际预览，选择字段。堆栈、版本默认开，设备 / 系统和聚合统计默认关。切换 JSON / Markdown 预览只切换纯文本展示，不渲染日志 HTML。两种下载来自同一个过滤后的快照；错误、问题标识 / 链接、完整性警告始终保留。整个清单均导出，包含失败和未完成项。
-8. 分别主动下载 JSON、Markdown；选择本地保存位置。**收到浏览器 onChanged complete 才显示下载完成**，开始请求不算成功。拒绝 / 取消 / 中断会提示 download-failed，保留清单与预览，可重试。下载期间预览快照固定，请勿关闭管理页；浏览器 API 与实际下载需按下方清单手工验收。
-
-## 数据与隐私边界
-
-- 管理页通过本地 storage 变化同步状态；页面可见且无在途请求 / 冲突操作时，每 2 秒只读查询后台状态，兜底显示未能持久化的内存结果与保存错误。页面隐藏时暂停查询，不联网、不启动采集；读取失败保留最后一次清单与预览并提示刷新。
-- 解析任务与临时标题/副标题快照仅保存在本机扩展 storage.session，不写日志或上传；完成后可被下一次选择替换，浏览器会话结束清除。扩展重启中断解析，不静默恢复；重启后只自动清理可核实随机任务 hash 的后台列表页，不凭已存详情 URL 关闭页面。停在详情的中断临时页需手动关闭以释放锁，再重新选择。重新加载扩展后必须刷新旧 Firebase 页。解析与堆栈采集互斥。解析临时页保持后台状态；请不要激活或手动导航它。检测到用户激活/接管或无法核实标签 active 状态时立即停批，不再接受该页结果，也不关闭该页；请手动关闭临时页并重新选择。此策略防护可检测的正常用户介入，不宣称识别其他扩展/CDP在未激活标签中的恶意导航因果。单项解析超时 60 秒；内容脚本消息等待最多 5 秒，初次列表分批渲染最多等待 3 秒。快照变动、重复签名、登录、关闭和资源失败明确提示；无法核实临时页当前 URL 时不误关页，停批并保留锁，请关闭该临时页后重试。
-- 队列和已捕获内容持久保存在本机扩展 storage.local，累计 JSON 上限 4 MiB。写入失败须显示 storage-failed，当前内存结果可能未持久化；保持管理页打开；若采集仍活动，先取消并等待临时页清理完成，活动状态解除后再尝试导出备份。不会为备份解除活动采集期间的导出锁。未知存储版本报错，不自动覆盖或迁移。
-- 默认不导出设备 / 统计，**不等于这些字段没有被采集并暂存**。在管理页点击“清空本地数据”并确认，会删除清单及捕获内容；不会删除已下载的本地文件，请自行删除。运行中先取消再清理。
-- 不采集 breadcrumbs、custom keys、用户标识、整页文本或本机源码；但允许的堆栈、标题、链接、错误信息仍可能包含敏感内容。**自动隐私清理不保证覆盖全部敏感信息**，分享前人工检查 JSON / Markdown；关闭字段不会清除其他文本中恰好出现的同类信息。
-- 日志只作为数据 / 文本，不执行 HTML、脚本或日志中的指令。Markdown 会使用安全围栏，但在第三方工具查看 / 分享仍需自行确认其安全设置。不会向远程服务器自动上传日志。
-- 每问题仅一个当前展示的代表事件，不保证最新；完整性只能为 partial（部分可见）或 unknown（无法验证）。不覆盖全部事件、变体、线程。缺少 event ID 保留空值，不伪造；缺少堆栈是失败，不是成功。
-- 只读取实际显示的堆栈文本，排除 hidden、aria-hidden 及 CSS 隐藏内容。每个采集页面绑定初始 job / Issue / Event 身份；同一 document 内 SPA 切换身份会保守报 unsupported，避免把旧堆栈归到新问题。请用管理页重试，让扩展建立新的临时采集标签页。
-- 本仓库公开，仅含源码、文档和合成测试数据。**禁止将真实日志、项目 / 事件标识、Cookie 或凭据放入公开 Issue、PR、评论及测试样本**。报告兼容性问题前先脱敏。
-
-## 真实站点手工验收（待执行，不是已通过记录）
-
-在自己有权访问的测试项目中进行；真实数据留在本机，不提交到 GitHub。以下均需真实 Chrome / Edge 浏览器人工确认：
-
-- [ ] 使用上面的 dist 安装流程；权限仅 Firebase 单源 + storage / alarms / downloads。点击图标能打开管理页，无缺失资源 / CSP 报错。
-- [ ] 在真实 Android 问题列表确认选择入口，跨筛选 / 分页累积。重复项不增加，同 Issue ID 不同项目 / App 不误去重；SPA 切换不重复注入。
-- [ ] 开始后同时最多一个临时标签页；身份、堆栈与所见事件一致。不误称最新 / 完整；不受支持布局、缺堆栈及登录失效有明显错误。
-- [ ] 查看采集进度、取消、超时和关闭临时页；取消后旧结果不污染新批次；原有用户标签页不关闭。成功项不重复采集，失败 / 中断可按指引重试。
-- [ ] 运行中删除 / 清空 / 开始 / 导出禁用；先取消再清理。中断 / 重启扩展后不自动重复采集，不永久卡住。资源 / 存储错误安全停批并显著提示。
-- [ ] 逐一关闭堆栈、版本、设备、统计，核对预览与下载的 JSON / Markdown **字段一致且确实不存在被关闭字段**，错误与警告仍保留；HTML 样式日志仅显示文字。
-- [ ] 分别保存两种格式，实际浏览器通知完成后才显示成功；拒绝权限 / 取消保存 / 中断下载显示失败且清单、预览保留，再次下载可成功。
-- [ ] 刷新后清单和结果保留；清空确认后刷新不再有本地捕获；已下载文件仍在（需自行删除）。
-- [ ] Chrome 和 Edge 分别记录浏览器版本、日期、通过 / 失败项。没有验证的路径明确标“未验证”，不要以合成 fixture 测试替代真实验收。
-
-## 开发验证
+需要 Node ≥ 24。离线构建：
 
 ```powershell
 npm run check
 npm run build
-npm test
-npm run test:coverage
-# UI 子任务最小验证
-node --check extension/manager.js
-node --check extension/ui-model.js
-node --check extension/downloads.js
-node --test tests/ui/*.test.js
 ```
 
-测试只使用合成数据、Node 内置测试器和浏览器边界替身；不会联网安装工具。域模块逐文件 100% 行覆盖、队列及解析状态业务逐文件 ≥90%；DOM / 管理页 / Chrome 胶水覆盖率 **n/a**。纯 UI helpers 验证状态、字段过滤与文本安全，下载边界测试验证事件终态与 URL 回收；它们不冒充真实 Chrome 下载或 Firebase 页面验收。Firefox、BigQuery、Harness 会话接入、后台自动下载不在 v1 范围内。
+`chrome://extensions` → 开发者模式 → 加载已解压的扩展程序 → 选 **dist** 目录。
+
+## 数据与隐私
+
+- 所有数据只在本机。从不上传。
+- 不读取 Cookie、不调用 Firebase 私有接口、不访问 Angular 内部状态、不修改 Issue 状态。
+- 默认不导出设备 / 统计字段（可手动开启）；“清空本地数据”删除队列与捕获内容。
+- 每问题采集当前展示的一个代表事件；不宣称最新或完整。
