@@ -39,7 +39,7 @@ export function mountContent(environment = {}) {
   host.setAttribute('data-crashbridge-root', 'v1');
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
-  style.textContent = ':host{all:initial;position:fixed!important;z-index:2147483647!important;display:block!important;width:320px;max-width:calc(100vw - 32px);box-sizing:border-box;background:#162235;color:#fff;border:2px solid #65c4ff;border-radius:12px;padding:16px;font:14px/1.5 system-ui;box-shadow:0 4px 24px #0008}:host([hidden]){display:none!important}button{font:inherit;padding:8px;margin:4px;border:1px solid #8ad1ff;border-radius:6px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}p{margin:8px 0;overflow-wrap:anywhere}strong{font-size:18px}.drag-handle{display:flex;align-items:center;justify-content:space-between;cursor:grab;user-select:none;touch-action:none}.drag-handle[data-crashbridge-dragging]{cursor:grabbing}.drag-grip{font-size:10px;letter-spacing:2px;opacity:.5;padding-left:8px}';
+  style.textContent = ':host{all:initial;position:fixed!important;right:16px;bottom:16px;z-index:2147483647!important;display:block!important;width:320px;max-width:calc(100vw - 32px);box-sizing:border-box;background:#162235;color:#fff;border:2px solid #65c4ff;border-radius:12px;padding:16px;font:14px/1.5 system-ui;box-shadow:0 4px 24px #0008}:host([hidden]){display:none!important}button{font:inherit;padding:8px;margin:4px;border:1px solid #8ad1ff;border-radius:6px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}p{margin:8px 0;overflow-wrap:anywhere}strong{font-size:18px}.drag-handle{display:flex;align-items:center;justify-content:space-between;cursor:grab;user-select:none;touch-action:none}.drag-handle[data-crashbridge-dragging]{cursor:grabbing}.drag-grip{font-size:10px;letter-spacing:2px;opacity:.5;padding-left:8px}';
   const headingBar = document.createElement('div');
   headingBar.setAttribute('class', 'drag-handle');
   const heading = document.createElement('strong');
@@ -63,10 +63,17 @@ export function mountContent(environment = {}) {
   (document.body ?? document.documentElement).append(host);
 
   const storage = environment.storage ?? globalThis.chrome?.storage?.local;
+  // The CSS already defaults to bottom-right; JS only overrides with a saved position.
+  const applyPosition = position => {
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) return;
+    host.style.right = 'auto'; host.style.bottom = 'auto';
+    host.style.left = `${Math.max(0, Math.min(position.x, (window.innerWidth ?? 1280) - 80))}px`;
+    host.style.top = `${Math.max(0, Math.min(position.y, (window.innerHeight ?? 720) - 40))}px`;
+  };
   const applyLanguage = async () => {
     try {
       const { t, readLanguage } = await import(runtime.getURL('src/content/i18n.js'));
-      const language = await readLanguage(key => storage.get(key));
+      const language = await readLanguage(key => storage?.get ? storage.get(key) : Promise.resolve({}));
       heading.textContent = t(language, 'toolbarTitle');
       notice.textContent = t(language, 'toolbarNotice');
       add.textContent = t(language, 'addSelected');
@@ -75,19 +82,12 @@ export function mountContent(environment = {}) {
     } catch { /* defaults stay */ }
   };
   if (storage?.get) void applyLanguage();
-
-  const applyPosition = position => {
-    if (!position) { host.style.right = '16px'; host.style.bottom = '16px'; return; }
-    host.style.right = 'auto'; host.style.bottom = 'auto';
-    host.style.left = `${Math.max(0, Math.min(position.x, window.innerWidth - 80))}px`;
-    host.style.top = `${Math.max(0, Math.min(position.y, window.innerHeight - 40))}px`;
-  };
   if (storage?.get) {
     void storage.get('crashbridge-toolbar-position').then(stored => {
       const p = stored?.['crashbridge-toolbar-position'];
-      applyPosition(p && Number.isFinite(p.x) && Number.isFinite(p.y) ? p : null);
-    }).catch(() => applyPosition(null));
-  } else applyPosition(null);
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) applyPosition(p);
+    }).catch(() => {});
+  }
   let dragOrigin = null;
   headingBar.addEventListener('pointerdown', event => {
     if (event.button !== 0) return;
