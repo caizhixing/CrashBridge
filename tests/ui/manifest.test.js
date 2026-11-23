@@ -12,7 +12,7 @@ test('MV3 requests exactly frozen permissions and Firebase-only injection/resour
   assert.deepEqual(manifest.background, { service_worker: 'src/background/service-worker.js', type: 'module' });
   assert.equal(Object.hasOwn(manifest.action, 'default_popup'), false);
   assert.deepEqual(manifest.content_scripts, [{ matches: ['https://console.firebase.google.com/*'], js: ['src/content/main.js'], run_at: 'document_idle' }]);
-  assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['src/content/app.js', 'src/content/copy-capture.js', 'src/adapter/firebase.js', 'src/adapter/selection.js', 'src/domain/model.js'], matches: ['https://console.firebase.google.com/*'] }]);
+  assert.deepEqual(manifest.web_accessible_resources, [{ resources: ['src/content/app.js', 'src/content/copy-capture.js', 'src/content/i18n.js', 'src/adapter/firebase.js', 'src/adapter/selection.js', 'src/domain/model.js'], matches: ['https://console.firebase.google.com/*'] }]);
   assert.doesNotMatch(JSON.stringify(manifest), /cookies|debugger|webRequest|<all_urls>|https?:\/\/(?!console\.firebase\.google\.com)/);
   assert.equal(manifest.content_security_policy.extension_pages, "script-src 'self'; object-src 'none'; base-uri 'none'");
 });
@@ -31,5 +31,8 @@ test('management page has only packaged scripts, Chinese semantics, warning/clea
   const manager = await read('extension/manager.js');
   assert.match(manager, /from '\.\/src\/domain\/export.js'/);
   assert.match(manager, /window.confirm/);
-  assert.doesNotMatch(manager, /fetch\(|XMLHttpRequest|console\.log|chrome\.storage\.local\.(clear|set|remove)/);
+  assert.doesNotMatch(manager, /fetch\(|XMLHttpRequest|console\.log|chrome\.storage\.local\.clear|chrome\.storage\.local\.remove/);
+  const storageWrites = manager.match(/chrome\.storage\.local\.set/g) ?? [];
+  assert.equal(storageWrites.length, 1, 'manager writes storage exactly once (language preference only)');
+  assert.match(manager, /writeLanguage\(values => chrome\.storage\.local\.set\(values\)/);
 });

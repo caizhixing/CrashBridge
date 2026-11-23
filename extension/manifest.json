@@ -13,7 +13,7 @@
     "run_at": "document_idle"
   }],
   "web_accessible_resources": [{
-    "resources": ["src/content/app.js", "src/content/copy-capture.js", "src/adapter/firebase.js", "src/adapter/selection.js", "src/domain/model.js"],
+    "resources": ["src/content/app.js", "src/content/copy-capture.js", "src/content/i18n.js", "src/adapter/firebase.js", "src/adapter/selection.js", "src/domain/model.js"],
     "matches": ["https://console.firebase.google.com/*"]
   }],
   "content_security_policy": { "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'" }

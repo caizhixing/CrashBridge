@@ -32,7 +32,7 @@ test('Every field option excludes the same fields in JSON and Markdown', () => {
     }
     for (const marker of ['rendered-dom', 'currently-displayed', 'unknown', 'Completeness unverified']) assert.ok(json.includes(marker));
     assert.match(md, /Capture source: rendered\\-dom/);
-    assert.match(md, /Event: 未取得/);
+    assert.match(md, /Event: not available/);
   }
 });
 

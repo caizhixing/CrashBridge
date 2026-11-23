@@ -33,14 +33,23 @@ export function summarize(items) {
   return { ...counts, total: items.length, finished: counts.succeeded + counts.failed + counts.cancelled };
 }
 
-/** @param {object} item */
-export function itemPresentation(item) {
+const PRESENTATION_WARNINGS = {
+  zh: { partial: '内容不完整：只取得部分可见内容。', unknown: '完整性未知：不能保证包含全部事件、变体或线程。', representative: '仅当前展示的一个代表事件，不保证是最新事件。' },
+  en: { partial: 'Incomplete: only partially visible content was captured.', unknown: 'Completeness unknown: cannot guarantee all events, variants or threads.', representative: 'Only the currently displayed representative event; not guaranteed to be the latest.' },
+  fr: { partial: 'Incomplet : seul un contenu partiellement visible a été capturé.', unknown: 'Complétude inconnue : tous les événements ou fils ne sont pas garantis.', representative: 'Uniquement l\u2019événement affiché ; pas garanti d\u2019être le plus récent.' },
+  es: { partial: 'Incompleto: solo se capturó contenido parcialmente visible.', unknown: 'Completitud desconocida: no se garantizan todos los eventos o hilos.', representative: 'Solo el evento representativo mostrado; no garantizado el más reciente.' },
+  pt: { partial: 'Incompleto: apenas conteúdo parcialmente visível foi capturado.', unknown: 'Completude desconhecida: nem todos os eventos ou threads são garantidos.', representative: 'Apenas o evento representativo exibido; não garantido o mais recente.' },
+};
+
+/** @param {object} item @param {string} [language] */
+export function itemPresentation(item, language = 'zh') {
+  const local = PRESENTATION_WARNINGS[language] ?? PRESENTATION_WARNINGS.zh;
   const warnings = [];
   if (item.capture) {
-    warnings.push(item.capture.completeness === 'partial' ? '内容不完整：只取得部分可见内容。' : '完整性未知：不能保证包含全部事件、变体或线程。');
-    warnings.push('仅当前展示的一个代表事件，不保证是最新事件。', ...(item.capture.warnings ?? []));
+    warnings.push(item.capture.completeness === 'partial' ? local.partial : local.unknown);
+    warnings.push(local.representative, ...(item.capture.warnings ?? []));
   }
-  return { title: item.issue.title || item.issue.issueId, status: STATUS[item.status] ?? '未知状态', error: errorText(item.error), warnings };
+  return { title: item.issue.title || item.issue.issueId, status: STATUS[item.status] ?? STATUS.pending, error: errorText(item.error), warnings };
 }
 
 /** @param {string} type @param {string} [key] */

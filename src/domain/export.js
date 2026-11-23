@@ -25,7 +25,7 @@ export function createBundle(items, options, exportedAt) {
 }
 
 function inline(value) {
-  if (value === null) return '未取得';
+  if (value === null) return 'not available';
   return String(value).replace(/[&<>]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[char])
     .replace(/[\\`*_{}\[\]()#+.!|~\-]/g, '\\$&').replace(/[\r\n\u2028\u2029]/g, ' ');
 }

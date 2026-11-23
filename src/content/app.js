@@ -39,12 +39,19 @@ export function mountContent(environment = {}) {
   host.setAttribute('data-crashbridge-root', 'v1');
   const shadow = host.attachShadow({ mode: 'open' });
   const style = document.createElement('style');
-  style.textContent = ':host{all:initial;position:fixed!important;right:16px!important;bottom:16px!important;z-index:2147483647!important;display:block!important;width:320px;max-width:calc(100vw - 32px);box-sizing:border-box;background:#162235;color:#fff;border:2px solid #65c4ff;border-radius:12px;padding:16px;font:14px/1.5 system-ui;box-shadow:0 4px 24px #0008}:host([hidden]){display:none!important}button{font:inherit;padding:8px;margin:4px;border:1px solid #8ad1ff;border-radius:6px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}p{margin:8px 0;overflow-wrap:anywhere}strong{font-size:18px}';
+  style.textContent = ':host{all:initial;position:fixed!important;z-index:2147483647!important;display:block!important;width:320px;max-width:calc(100vw - 32px);box-sizing:border-box;background:#162235;color:#fff;border:2px solid #65c4ff;border-radius:12px;padding:16px;font:14px/1.5 system-ui;box-shadow:0 4px 24px #0008}:host([hidden]){display:none!important}button{font:inherit;padding:8px;margin:4px;border:1px solid #8ad1ff;border-radius:6px;cursor:pointer}button:disabled{opacity:.5;cursor:not-allowed}p{margin:8px 0;overflow-wrap:anywhere}strong{font-size:18px}.drag-handle{display:flex;align-items:center;justify-content:space-between;cursor:grab;user-select:none;touch-action:none}.drag-handle[data-crashbridge-dragging]{cursor:grabbing}.drag-grip{font-size:10px;letter-spacing:2px;opacity:.5;padding-left:8px}';
+  const headingBar = document.createElement('div');
+  headingBar.setAttribute('class', 'drag-handle');
+  const heading = document.createElement('strong');
+  heading.textContent = 'CrashBridge';
+  const grip = document.createElement('span');
+  grip.setAttribute('class', 'drag-grip');
+  grip.textContent = '⠿⠿';
+  grip.setAttribute('aria-hidden', 'true');
+  headingBar.append(heading, grip);
   const count = document.createElement('p');
   const manager = document.createElement('button'); manager.type = 'button'; manager.textContent = '打开管理页';
   const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = '取消解析'; cancel.hidden = true;
-  const heading = document.createElement('strong');
-  heading.textContent = 'CrashBridge';
   const notice = document.createElement('p');
   notice.textContent = '真实 Firebase 控制台兼容性未验证；仅采集当前已渲染事件。';
   const status = document.createElement('p');
@@ -52,8 +59,55 @@ export function mountContent(environment = {}) {
   const add = document.createElement('button');
   add.type = 'button';
   add.textContent = '将勾选问题加入清单';
-  shadow.append(style, heading, notice, count, add, manager, cancel, status);
+  shadow.append(style, headingBar, notice, count, add, manager, cancel, status);
   (document.body ?? document.documentElement).append(host);
+
+  const storage = environment.storage ?? globalThis.chrome?.storage?.local;
+  const applyLanguage = async () => {
+    try {
+      const { t, readLanguage } = await import(runtime.getURL('src/content/i18n.js'));
+      const language = await readLanguage(key => storage.get(key));
+      heading.textContent = t(language, 'toolbarTitle');
+      notice.textContent = t(language, 'toolbarNotice');
+      add.textContent = t(language, 'addSelected');
+      manager.textContent = t(language, 'openManager');
+      cancel.textContent = t(language, 'cancelResolve');
+    } catch { /* defaults stay */ }
+  };
+  if (storage?.get) void applyLanguage();
+
+  const applyPosition = position => {
+    if (!position) { host.style.right = '16px'; host.style.bottom = '16px'; return; }
+    host.style.right = 'auto'; host.style.bottom = 'auto';
+    host.style.left = `${Math.max(0, Math.min(position.x, window.innerWidth - 80))}px`;
+    host.style.top = `${Math.max(0, Math.min(position.y, window.innerHeight - 40))}px`;
+  };
+  if (storage?.get) void storage.get('crashbridge-toolbar-position').then(stored => { const p = stored?.['crashbridge-toolbar-position']; if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) applyPosition(p); }).catch(() => {});
+  else applyPosition(null);
+  let dragOrigin = null;
+  headingBar.addEventListener('pointerdown', event => {
+    if (event.button !== 0) return;
+    const rect = host.getBoundingClientRect();
+    dragOrigin = { pointerX: event.clientX, pointerY: event.clientY, left: rect.left, top: rect.top };
+    headingBar.setAttribute('data-crashbridge-dragging', '');
+    if (typeof headingBar.setPointerCapture === 'function') headingBar.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  });
+  headingBar.addEventListener('pointermove', event => {
+    if (!dragOrigin) return;
+    const x = dragOrigin.left + event.clientX - dragOrigin.pointerX;
+    const y = dragOrigin.top + event.clientY - dragOrigin.pointerY;
+    applyPosition({ x: Math.max(0, Math.min(x, window.innerWidth - 80)), y: Math.max(0, Math.min(y, window.innerHeight - 40)) });
+  });
+  const endDrag = event => {
+    if (!dragOrigin) return;
+    dragOrigin = null;
+    headingBar.removeAttribute('data-crashbridge-dragging');
+    const rect = host.getBoundingClientRect();
+    if (storage?.set) void storage.set({ 'crashbridge-toolbar-position': { x: rect.left, y: rect.top } }).catch(() => {});
+  };
+  headingBar.addEventListener('pointerup', endDrag);
+  headingBar.addEventListener('pointercancel', endDrag);
 
   /** @type {Map<Element,{host:Element,input:HTMLInputElement,issue:object}>} */
   const controls = new Map();

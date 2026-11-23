@@ -9,35 +9,38 @@
 </head>
 <body>
   <header class="masthead">
-    <div class="brand"><span class="brand-mark" aria-hidden="true">CB</span><div><p class="eyebrow">CRASHBRIDGE / LOCAL FIRST</p><h1>本地日志工作台</h1></div></div>
-    <span class="local-badge">仅在本机处理 · 不自动上传</span>
+    <div class="brand"><span class="brand-mark" aria-hidden="true">CB</span><div><p class="eyebrow">CRASHBRIDGE / LOCAL FIRST</p><h1 data-i18n="h1">本地日志工作台</h1></div></div>
+    <div class="masthead-actions">
+      <label class="lang-picker" for="language-select"><span aria-hidden="true">🌐</span><select id="language-select"><option value="zh">中文</option><option value="en">English</option><option value="fr">Français</option><option value="es">Español</option><option value="pt">Português</option></select></label>
+      <span class="local-badge" data-i18n="localOnly">仅在本机处理 · 不自动上传</span>
+    </div>
   </header>
   <main>
-    <aside class="notice compatibility" aria-label="兼容性边界"><strong>兼容性未验证</strong><p id="compatibility"></p></aside>
-    <noscript>此管理页需要启用扩展自身的 JavaScript，不加载任何远程脚本。</noscript>
+    <aside class="notice compatibility" aria-label="compat"><strong data-i18n="compatTitle">兼容性未验证</strong><p id="compatibility" data-i18n="compatWarning"></p></aside>
+    <noscript>JavaScript required.</noscript>
     <section id="operation-error" class="notice error" role="alert" hidden></section>
-    <section class="intro"><div><p class="eyebrow">01 / 收集与整理</p><h2>跨页累积，一次整理</h2><p>先在 Firebase Android 问题列表勾选并加入清单，再回到这里主动采集。</p></div><button id="refresh" class="secondary" type="button">刷新状态</button></section>
-    <section class="stats" aria-label="采集概览">
-      <div><span>清单总数</span><strong id="count-total">—</strong></div><div><span>已取得</span><strong id="count-succeeded">—</strong></div><div><span>待采集</span><strong id="count-pending">—</strong></div><div><span>失败 / 中断</span><strong id="count-problems">—</strong></div>
+    <section class="intro"><div><p class="eyebrow" data-i18n="section01">01 / 收集与整理</p><h2 data-i18n="section01H2">跨页累积，一次整理</h2><p data-i18n="section01P">先在 Firebase Android 问题列表勾选并加入清单，再回到这里主动采集。</p></div><button id="refresh" class="secondary" type="button" data-i18n="refresh">刷新状态</button></section>
+    <section class="stats" aria-label="stats">
+      <div><span data-i18n="total">清单总数</span><strong id="count-total">—</strong></div><div><span data-i18n="succeeded">已取得</span><strong id="count-succeeded">—</strong></div><div><span data-i18n="pending">待采集</span><strong id="count-pending">—</strong></div><div><span data-i18n="problems">失败 / 中断</span><strong id="count-problems">—</strong></div>
     </section>
     <section class="panel" aria-labelledby="queue-heading">
-      <div class="panel-heading"><div><h2 id="queue-heading">问题清单</h2><p id="progress-label" role="status">正在读取本地状态…</p></div><span class="limit">最多 100 个问题</span></div>
-      <progress id="progress" value="0" max="1" aria-label="本地清单处理进度"></progress>
-      <div class="toolbar"><button id="start" type="button" disabled>开始采集</button><button id="retry" class="secondary" type="button" disabled>重试失败项</button><button id="cancel" class="secondary" type="button" disabled>取消采集</button><button id="clear" class="danger" type="button" disabled>清空本地数据</button></div>
-      <p class="hint">开始处理待采集 / 已取消项；成功项保留、不重复采集。要重新采集成功项，请先删除该项，再从列表重新添加。失败项请用“重试失败项”。</p>
-      <div id="empty" class="empty" hidden><strong>清单还是空的</strong><p>打开已登录的 Firebase Crashlytics Android 问题列表，勾选当前已加载的问题并加入清单。可跨筛选、分页继续累积。</p><p>没有选择入口？请检查扩展已启用并有 Firebase 单站点访问权限，刷新列表。仍不可用可能是页面布局不受支持；不要授予全站权限。</p></div>
-      <ul id="queue" class="queue" aria-label="已添加的问题"></ul>
+      <div class="panel-heading"><div><h2 id="queue-heading" data-i18n="queueH2">问题清单</h2><p id="progress-label" role="status" data-i18n="readingState">正在读取本地状态…</p></div><span class="limit" data-i18n="limit">最多 100 个问题</span></div>
+      <progress id="progress" value="0" max="1" data-i18n-aria="progress"></progress>
+      <div class="toolbar"><button id="start" type="button" data-i18n="start" disabled>开始采集</button><button id="retry" class="secondary" type="button" data-i18n="retry" disabled>重试失败项</button><button id="cancel" class="secondary" type="button" data-i18n="cancelBtn" disabled>取消采集</button><button id="clear" class="danger" type="button" data-i18n="clear" disabled>清空本地数据</button></div>
+      <p class="hint" data-i18n="hintStart">开始处理待采集 / 已取消项；成功项保留、不重复采集。要重新采集成功项，请先删除该项，再从列表重新添加。失败项请用“重试失败项”。</p>
+      <div id="empty" class="empty" hidden><strong data-i18n="emptyTitle">清单还是空的</strong><p data-i18n="emptyP1">打开已登录的 Firebase Crashlytics Android 问题列表，勾选当前已加载的问题并加入清单。可跨筛选、分页继续累积。</p><p data-i18n="emptyP2">没有选择入口？请检查扩展已启用并有 Firebase 单站点访问权限，刷新列表。仍不可用可能是页面布局不受支持；不要授予全站权限。</p></div>
+      <ul id="queue" class="queue" aria-label="queue"></ul>
     </section>
     <section class="panel export-panel" aria-labelledby="export-heading">
-      <div class="panel-heading"><div><p class="eyebrow">02 / 检查与导出</p><h2 id="export-heading">你看到的，就是将下载的内容</h2><p>导出整个清单，包含失败 / 未完成条目。错误、标识与完整性警告始终保留。</p></div></div>
-      <aside class="notice privacy"><strong>分享前，先检查敏感信息</strong><p id="privacy"></p><p>事件可能暂存设备、系统与统计信息，即使下方不导出。使用“清空本地数据”删除清单和捕获内容；已下载文件需自行删除。</p></aside>
-      <fieldset id="fields" disabled><legend>下载字段（JSON 与 Markdown 同步生效）</legend><label><input id="field-stacktrace" type="checkbox" checked>异常堆栈</label><label><input id="field-version" type="checkbox" checked>应用版本</label><label><input id="field-device" type="checkbox">设备 / 系统</label><label><input id="field-statistics" type="checkbox">聚合统计</label></fieldset>
-      <div class="preview-heading"><label for="preview-format">预览格式 <select id="preview-format"><option value="json">JSON</option><option value="markdown">Markdown（纯文本）</option></select></label><span id="snapshot-time" class="hint">尚无预览</span></div>
-      <pre id="preview" tabindex="0" aria-label="实际导出内容预览">加入问题后可查看导出预览。</pre>
-      <div class="toolbar"><button id="download-json" type="button" disabled>下载 JSON</button><button id="download-markdown" class="secondary" type="button" disabled>下载 Markdown</button></div>
-      <p id="download-status" class="download-status" role="status" aria-live="polite">由你主动下载；浏览器确认完成后才显示成功。下载期间请勿关闭此页。</p>
+      <div class="panel-heading"><div><p class="eyebrow" data-i18n="section02">02 / 检查与导出</p><h2 id="export-heading" data-i18n="section02H2">你看到的，就是将下载的内容</h2><p data-i18n="section02P">导出整个清单，包含失败 / 未完成条目。错误、标识与完整性警告始终保留。</p></div></div>
+      <aside class="notice privacy"><strong data-i18n="privacyTitle">分享前，先检查敏感信息</strong><p id="privacy" data-i18n="privacyWarning"></p><p data-i18n="privacyNote">事件可能暂存设备、系统与统计信息，即使下方不导出。使用“清空本地数据”删除清单和捕获内容；已下载文件需自行删除。</p></aside>
+      <fieldset id="fields" disabled><legend data-i18n="fieldsLegend">下载字段（JSON 与 Markdown 同步生效）</legend><label><input id="field-stacktrace" type="checkbox" checked><span data-i18n="fieldStack">异常堆栈</span></label><label><input id="field-version" type="checkbox" checked><span data-i18n="fieldVersion">应用版本</span></label><label><input id="field-device" type="checkbox"><span data-i18n="fieldDevice">设备 / 系统</span></label><label><input id="field-statistics" type="checkbox"><span data-i18n="fieldStats">聚合统计</span></label></fieldset>
+      <div class="preview-heading"><label for="preview-format"><span data-i18n="previewFormat">预览格式</span> <select id="preview-format"><option value="json">JSON</option><option value="markdown" data-i18n="previewMarkdown">Markdown（纯文本）</option></select></label><span id="snapshot-time" class="hint" data-i18n="noPreview">尚无预览</span></div>
+      <pre id="preview" tabindex="0" aria-label="preview" data-i18n="previewInitial">加入问题后可查看导出预览。</pre>
+      <div class="toolbar"><button id="download-json" type="button" data-i18n="downloadJson" disabled>下载 JSON</button><button id="download-markdown" class="secondary" type="button" data-i18n="downloadMarkdown" disabled>下载 Markdown</button></div>
+      <p id="download-status" class="download-status" role="status" aria-live="polite" data-i18n="downloadNote">由你主动下载；浏览器确认完成后才显示成功。下载期间请勿关闭此页。</p>
     </section>
-    <footer>只读取当前展示的一个代表事件，不保证最新，也不覆盖所有事件、变体或线程。不会修改 Firebase 问题状态。</footer>
+    <footer data-i18n="footer">只读取当前展示的一个代表事件，不保证最新，也不覆盖所有事件、变体或线程。不会修改 Firebase 问题状态。</footer>
   </main>
 </body>
 </html>

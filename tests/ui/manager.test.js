@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, cp, writeFile, rm } from 'node:fs/promises';
+import { mkdtemp, cp, writeFile, rm, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -32,6 +32,8 @@ async function setup(t, { permissionDenied = false, initialState = makeState('SY
   // Assemble the real packaged modules, without rewriting imports or replacing manager logic.
   const dir = await mkdtemp(join(tmpdir(), 'crashbridge-ui-test-'));
   await cp(new URL('../../extension/', import.meta.url), dir, { recursive: true });
+  await mkdir(join(dir, 'src', 'content'), { recursive: true });
+  await cp(new URL('../../src/content/i18n.js', import.meta.url), join(dir, 'src', 'content', 'i18n.js'));
   await cp(new URL('../../src/domain/', import.meta.url), join(dir, 'src/domain'), { recursive: true });
   await writeFile(join(dir, 'package.json'), '{"type":"module"}');
   const ids = new Map();

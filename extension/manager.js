@@ -2,6 +2,7 @@ import * as serializers from './src/domain/export.js';
 import { DEFAULT_OPTIONS, COMPATIBILITY_WARNING, PRIVACY_WARNING, controlsFor, summarize, itemPresentation, managementMessage, createExportSnapshot, setText, safeSourceUrl, errorText } from './ui-model.js';
 import { createDownloader } from './downloads.js';
 import { createStateSync } from './state-sync.js';
+import { LANGUAGES, DEFAULT_LANGUAGE, mt, readLanguage, writeLanguage, statusText, errorTextFor, confirmClearText } from './src/content/i18n.js';
 
 const byId = id => document.getElementById(id);
 const downloader = createDownloader({ downloads: chrome.downloads, createObjectURL: blob => URL.createObjectURL(blob), revokeObjectURL: url => URL.revokeObjectURL(url) });
@@ -12,8 +13,22 @@ let refreshQueued = false;
 let requestVersion = 0;
 const options = { ...DEFAULT_OPTIONS };
 
-setText(byId('compatibility'), COMPATIBILITY_WARNING);
-setText(byId('privacy'), PRIVACY_WARNING);
+let currentLanguage = DEFAULT_LANGUAGE;
+function applyLanguage(language) {
+  if (!LANGUAGES.includes(language)) return;
+  currentLanguage = language;
+  document.documentElement.lang = language === 'zh' ? 'zh-CN' : language;
+  document.title = mt(language, 'title');
+  for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = mt(language, element.getAttribute('data-i18n'));
+  for (const element of document.querySelectorAll('[data-i18n-aria]')) element.setAttribute('aria-label', mt(language, element.getAttribute('data-i18n-aria')));
+}
+const languageSelect = byId('language-select');
+languageSelect.addEventListener('change', async () => {
+  applyLanguage(languageSelect.value);
+  try { await writeLanguage(values => chrome.storage.local.set(values), languageSelect.value); } catch { /* preference stays session-local */ }
+});
+const languageStorage = globalThis.chrome?.storage?.local;
+if (languageStorage) void readLanguage(keys => languageStorage.get(keys)).then(language => { languageSelect.value = language; applyLanguage(language); }).catch(() => {});
 
 function showError(message) {
   setText(byId('operation-error'), message);
@@ -60,32 +75,38 @@ function render() {
   setText(byId('count-pending'), String(counts.pending));
   setText(byId('count-problems'), String(counts.failed + counts.cancelled));
   const active = Boolean(state?.running || state?.active);
-  setText(byId('progress-label'), `${active ? '采集中' : '当前未采集'} · 已处理 ${counts.finished} / ${counts.total} · 采集中 ${counts.collecting}`);
+  const busyText = { zh: '采集中', en: 'Capturing', fr: 'Capture', es: 'Capturando', pt: 'Capturando' }[currentLanguage] ?? '采集中';
+  const idleText = { zh: '当前未采集', en: 'Not capturing', fr: 'Aucune capture', es: 'Sin captura', pt: 'Sem captura' }[currentLanguage] ?? '当前未采集';
+  const processedText = { zh: '已处理', en: 'processed', fr: 'traités', es: 'procesados', pt: 'processados' }[currentLanguage] ?? '已处理';
+  const capturingText = { zh: '采集中', en: 'capturing', fr: 'en cours', es: 'capturando', pt: 'capturando' }[currentLanguage] ?? '采集中';
+  setText(byId('progress-label'), `${active ? busyText : idleText} · ${processedText} ${counts.finished} / ${counts.total} · ${capturingText} ${counts.collecting}`);
   byId('progress').max = Math.max(1, counts.total);
   byId('progress').value = counts.finished;
   byId('empty').hidden = !state || items.length > 0;
   const list = document.createDocumentFragment();
   for (const item of items) {
-    const presentation = itemPresentation(item);
+    const presentation = itemPresentation(item, currentLanguage);
     const row = document.createElement('li');
     row.className = `issue-row status-${item.status}`;
     const heading = textElement('div', '', 'issue-heading');
-    heading.append(textElement('h3', presentation.title), textElement('span', presentation.status, `status-pill ${item.status}`));
-    row.append(heading, textElement('p', `${item.issue.projectId} / ${item.issue.appId}`, 'issue-meta'), textElement('p', `Issue：${item.issue.issueId}`, 'issue-meta'));
+    heading.append(textElement('h3', presentation.title), textElement('span', statusText(currentLanguage, item.status), `status-pill ${item.status}`));
+    row.append(heading, textElement('p', `${item.issue.projectId} / ${item.issue.appId}`, 'issue-meta'), textElement('p', `Issue: ${item.issue.issueId}`, 'issue-meta'));
     if (presentation.error) row.append(textElement('p', presentation.error, 'item-error'));
     for (const warning of presentation.warnings) row.append(textElement('p', warning, 'item-warning'));
     const actions = textElement('div', '', 'issue-actions');
     const sourceUrl = safeSourceUrl(item.issue.url);
     if (sourceUrl) {
-      const link = textElement('a', '打开来源页 ↗');
+      const linkText = { zh: '打开来源页 ↗', en: 'Open source ↗', fr: 'Ouvrir la source ↗', es: 'Abrir origen ↗', pt: 'Abrir origem ↗' }[currentLanguage] ?? '打开来源页 ↗';
+      const link = textElement('a', linkText);
       link.href = sourceUrl;
       link.target = '_blank';
       link.rel = 'noopener noreferrer';
       actions.append(link);
     }
-    const remove = textElement('button', '删除此项', 'text-button');
+    const removeText = { zh: '删除此项', en: 'Remove', fr: 'Supprimer', es: 'Eliminar', pt: 'Remover' }[currentLanguage] ?? '删除此项';
+    const remove = textElement('button', removeText, 'text-button');
     remove.type = 'button';
-    remove.setAttribute('aria-label', `删除 ${presentation.title}`);
+    remove.setAttribute('aria-label', `${removeText} ${presentation.title}`);
     remove.addEventListener('click', () => mutate('REMOVE_ISSUE', item.key));
     actions.append(remove);
     row.append(actions);
@@ -98,7 +119,7 @@ function render() {
 async function send(type, key) {
   const response = await chrome.runtime.sendMessage(managementMessage(type, key));
   if (!response || typeof response.ok !== 'boolean') throw new Error('扩展后台未响应，请重新打开管理页。');
-  if (!response.ok) throw new Error(errorText(response.error));
+  if (!response.ok) throw new Error(errorTextFor(currentLanguage, response.error?.code, response.error?.message));
   const next = response.data;
   if (next?.schemaVersion !== 1 || !Array.isArray(next.items)) throw new Error('本地数据格式未知或不受支持。未覆盖原数据，请保留现场排查。');
   return next;
@@ -112,10 +133,11 @@ async function refresh() {
     if (version !== requestVersion) return;
     const changed = JSON.stringify(next) !== JSON.stringify(state);
     state = next;
-    showError(errorText(state.lastError));
+    showError(errorTextFor(currentLanguage, state.lastError?.code, state.lastError?.message));
     if (changed) render();
   } catch (error) {
-    if (version === requestVersion) showError(error.message || '读取本地清单失败，请刷新重试。');
+    const refreshFailed = { zh: '读取本地清单失败，请刷新重试。', en: 'Failed to read local state; refresh and retry.', fr: 'Échec de lecture; actualisez et réessayez.', es: 'Fallo al leer; actualice y reintente.', pt: 'Falha ao ler; atualize e tente novamente.' }[currentLanguage] ?? 'Failed to read local state; refresh and retry.';
+    if (version === requestVersion) showError(error.message || refreshFailed);
   }
 }
 
@@ -132,15 +154,15 @@ async function drainRefresh() {
 async function mutate(type, key) {
   const map = { START_CAPTURE: 'start', RETRY_FAILED: 'retry', CANCEL_CAPTURE: 'cancel', CLEAR_QUEUE: 'clear', REMOVE_ISSUE: 'remove' };
   if (!controlsFor(state, busy || downloader.active)[map[type]]) return;
-  if (type === 'CLEAR_QUEUE' && !window.confirm('清空全部本地清单与捕获内容？此操作不可撤销，不会删除已经下载的文件。')) return;
+  if (type === 'CLEAR_QUEUE' && !window.confirm(confirmClearText(currentLanguage))) return;
   ++requestVersion;
   busy = true;
   updateControls();
   try {
     state = await send(type, key);
-    showError(errorText(state.lastError));
+    showError(errorTextFor(currentLanguage, state.lastError?.code, state.lastError?.message));
     render();
-  } catch (error) { showError(error.message || '操作失败，清单未主动删除，请刷新检查。'); }
+  } catch (error) { showError(error.message || 'Operation failed; the list was not deleted. Refresh to check.'); }
   finally { busy = false; updateControls(); await drainRefresh(); }
 }
 
