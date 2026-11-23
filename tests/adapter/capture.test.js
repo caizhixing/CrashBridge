@@ -20,6 +20,40 @@ test('extracts one rendered cause chain, null metadata, unknown completeness and
   assert.deepEqual(validateCapture(capture), capture);
 });
 
+test('real Firebase console frames without "at" prefix are captured; icon ligatures excluded; sibling region with frames preferred', () => {
+  // Mirrors the real detail DOM: div.stack-trace > div[role=region] with frames like
+  // "pkg.Class.method (File.kt:42)" concatenated on one line, plus mat-icon ligatures.
+  const document = makeDocument(ISSUE_URL);
+  const outer = element('div', '', { class: 'stack-trace fire-theme-container' });
+  const header = element('div', 'Fatal Exception: java.util.ConcurrentModificationException');
+  const icon = element('mat-icon', 'keyboard_arrow_up', { class: 'mat-icon google-symbols', 'aria-hidden': 'true' });
+  const region = element('div', '', { role: 'region', 'aria-labelledby': 'trace-heading' });
+  document.body.append(element('h2', 'Fatal Exception header', { id: 'trace-heading' }));
+  region.append(element('span', 'app.lawnchair.feed.FeedOverlayManager.openQuickTool (FeedOverlayManager.kt:529)'));
+  region.append(element('mat-icon', 'arrow_drop_down', { class: 'mat-icon google-symbols' }));
+  region.append(element('span', 'com.tapkit.launchertools.QuickAccessActivityKt.QuickAccessScreen$lambda$2$0$0 (QuickAccessActivity.kt:383)'));
+  region.append(element('span', 'androidx.compose.foundation.AbstractClickableNode.performClick (Clickable.kt:1699)'));
+  region.append(element('span', 'com.android.internal.os.ZygoteInit.main (ZygoteInit.java:972)'));
+  outer.append(header, icon, region);
+  document.body.append(outer);
+  const capture = extractCapture(document, issue, NOW);
+  assert.equal(capture.completeness, 'unknown');
+  assert.ok(capture.stacktrace.includes('openQuickTool (FeedOverlayManager.kt:529)'));
+  assert.ok(capture.stacktrace.includes('ZygoteInit.main (ZygoteInit.java:972)'));
+  assert.ok(!capture.stacktrace.includes('arrow_drop_down'), 'decorative icon ligatures must not leak into the stack');
+  assert.ok(!capture.stacktrace.includes('keyboard_arrow_up'));
+  assert.deepEqual(validateCapture(capture), capture);
+  // A second sibling region that lacks frames is ignored; the one with frames wins.
+  const sibling = element('div', 'Only a header, no frames', { class: 'stacktrace' });
+  document.body.append(sibling);
+  const second = extractCapture(document, issue, NOW);
+  assert.equal(second.stacktrace, capture.stacktrace);
+  // Two sibling regions that both contain frames remain ambiguous.
+  const other = element('div', 'at other.Foo.bar(Foo.java:1)', { class: 'stack-trace' });
+  document.body.append(other);
+  assert.throws(() => extractCapture(document, issue, NOW), code('unsupported'));
+});
+
 test('semantic labelled region fallback and narrow metadata dl support', () => {
   const document = makeDocument(ISSUE_URL);
   const heading = element('h2', 'Stack trace', { id: 'trace-heading' });

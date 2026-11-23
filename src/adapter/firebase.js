@@ -74,6 +74,11 @@ function failure(code, message) { return Object.assign(new Error(message), { cod
 // Do not use body/main text, breadcrumbs, custom keys, or unscoped pre elements as a stack fallback.
 const STACK_REGIONS = 'crashlytics-stack-trace, .stacktrace, .stack-trace, [aria-label="Stack trace"], [aria-label="Stacktrace"]';
 const SEMANTIC_REGIONS = '[role="region"][aria-labelledby], section[aria-labelledby]';
+// Real Firebase renders frames without the "at " prefix: "pkg.Class.method (File.kt:42)".
+const AT_FRAME = /(?:^|\n)\s*at\s+[\w.$]+\([^\n]*\)/;
+const NATIVE_FRAME = /(?:^|\n)\s*#\d+\s+pc\s+[\da-f]+\b/i;
+const CONSOLE_FRAME = /(?:^|[\s\n])[A-Za-z_$][\w.$<>]*\s*\([\w.$]+\.(?:java|kt|scala|smali)(?::\d+)?\)/;
+const hasFrame = stack => AT_FRAME.test(stack) || NATIVE_FRAME.test(stack) || CONSOLE_FRAME.test(stack);
 
 /** Only rendered, accessible elements may supply capture text. @param {Document} document @param {Element} element */
 function visible(document, element) {
@@ -91,6 +96,8 @@ function visible(document, element) {
 function renderedText(document, element) {
   if (!visible(document, element)) return '';
   if (element.tagName === 'BR') return '\n';
+  // Material icon ligatures ("arrow_drop_down") are decorative, not stack content.
+  if (/\b(?:mat-icon|google-symbols|material-icons)\b/.test(element.className ?? '')) return '';
   let result = '';
   for (const child of element.childNodes) {
     if (child.nodeType === 3) result += child.nodeValue ?? '';
@@ -148,14 +155,20 @@ export function extractCapture(document, issue, now) {
     if (!identity || identity.projectId !== actual.projectId || identity.appId !== actual.appId || identity.issueId !== actual.issueId) throw failure('unsupported', 'Ambiguous page identity.');
   }
   if (!Number.isFinite(Date.parse(now))) throw failure('unsupported', 'Invalid capture timestamp.');
-  const regions = stackRegions(document);
+  let regions = stackRegions(document);
+  if (regions.length > 1) {
+    // During SPA rendering sibling regions can coexist briefly; the one containing
+    // actual frames is the stack region — exactly one is required, zero or many stays ambiguous.
+    const withFrames = regions.filter(region => hasFrame(renderedText(document, region).trim()));
+    if (withFrames.length === 1) regions = withFrames;
+  }
   if (regions.length !== 1) throw failure('unsupported', 'No unique supported stack trace region was found.');
   const region = regions[0];
   const blocks = [...region.querySelectorAll('pre, [role="code"]')].filter(block => visible(document, block));
   // A single nested code block is acceptable; concatenating unknown independent blocks is not.
   if (blocks.length > 1) throw failure('unsupported', 'Multiple stack blocks cannot be safely identified as one event.');
   const stack = renderedText(document, blocks[0] ?? region).trim();
-  if (!/(?:^|\n)\s*(?:at\s+[\w.$]+\([^\n]*\)|#\d+\s+pc\s+[\da-f]+\b)/im.test(stack)) throw failure('missing-stack', 'No rendered Android stack frames were found.');
+  if (!hasFrame(stack)) throw failure('missing-stack', 'No rendered Android stack frames were found.');
   const partial = stack.length > LIMITS.maxStackLength || Boolean(region.querySelector('[aria-expanded="false"], [aria-busy="true"]'));
   const warnings = ['Real Firebase console DOM compatibility has not been verified.', 'Only the currently displayed representative event is captured; latest event and completeness are not verified.'];
   if (stack.length > LIMITS.maxStackLength) warnings.push('Stack trace truncated to 200000 characters.');

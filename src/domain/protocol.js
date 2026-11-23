@@ -44,6 +44,16 @@ export function parseMessage(value) {
       normalized = {};
       break;
     }
+    case 'LOG_EVENT': {
+      const event = text(payload.event, 200);
+      normalized = { event, details: payload.details ?? null };
+      break;
+    }
+    case 'GET_LOGS': {
+      if (Object.keys(payload).length !== 0) throw new Error('Expected empty payload');
+      normalized = {};
+      break;
+    }
     default: throw new Error('Unknown runtime message type');
   }
   const result = { namespace: 'crashbridge', version: 1, type: input.type, payload: normalized };

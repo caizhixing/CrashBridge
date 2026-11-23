@@ -1,6 +1,9 @@
 import { LIMITS, issueKey, validateQueueItem, createQueueItem } from '../domain/model.js';
 import { parseMessage } from '../domain/protocol.js';
 import { parseIssueUrl } from '../adapter/firebase.js';
+import { log } from './logger.js';
+const DEBUG = true;
+const debug = (event, details = {}) => { if (DEBUG) log(event, details); };
 
 /** @typedef {ReturnType<typeof createQueueItem>} QueueItem */
 /** @typedef {{code:string,message:string}} QueueError */
@@ -180,6 +183,7 @@ export function createController(platform) {
     }
     let active = null;
     try {
+      debug('schedule:opening-tab', { key: item.key.slice(0, 20) + '…' });
       const tabId = await platform.open(url);
       if (!Number.isInteger(tabId)) throw new Error('Browser returned no capture tab ID.');
       active = {
@@ -208,6 +212,7 @@ export function createController(platform) {
 
   async function finish(error, capture, alreadyClosed = false) {
     const active = state.active;
+    debug('finish', { errorCode: error?.code ?? null, hasCapture: Boolean(capture) });
     state.active = null;
     const item = state.items.find((entry) => entry.key === active.key);
     item.status = error ? 'failed' : 'succeeded';
@@ -260,6 +265,7 @@ export function createController(platform) {
       }
       const { type, payload } = message;
       if (type === 'TIMEOUT' || type === 'TAB_CLOSED') {
+        debug('internal-event', { type, hasActive: Boolean(state.active), running: state.running });
         const active = state.active;
         if (!active || !state.running || (type === 'TIMEOUT' ? payload?.jobId !== active.jobId : payload?.tabId !== active.tabId)) {
           throw new Error('Stale capture event.');
@@ -288,15 +294,18 @@ export function createController(platform) {
         if (!await save()) return failure(state.lastError);
         return { ...success(), added: additions.length, duplicates: payload.issues.length - additions.length };
       } else if (type === 'CAPTURE_RESULT') {
+        debug('capture-result', { senderTabId: sender?.tab?.id ?? null, hasCapture: Boolean(payload.capture), errorCode: payload.error?.code ?? null, hasActive: Boolean(state.active), running: state.running });
         const active = state.active;
         const source = firebaseSender(sender);
         if (!source || !active || !state.running || sender.tab.id !== active.tabId || payload.jobId !== active.jobId
             || payload.issueKey !== active.key) {
+          debug('capture-result:rejected', { hasSource: Boolean(source), hasActive: Boolean(active), running: state.running, senderTabId: sender?.tab?.id ?? null, activeTabId: active?.tabId ?? null, jobMatches: payload.jobId === active?.jobId, issueMatches: payload.issueKey === active?.key });
           throw new Error('Capture sender/tab/job/issue mismatch.');
         }
         if (payload.capture && issueKey(payload.capture.issue) !== active.key) throw new Error('Capture issue mismatch.');
         return await finish(payload.error, payload.capture) ? success() : failure(state.lastError);
       } else if (type === 'QUERY_ACTIVE_JOB') {
+        debug('query-active-job', { senderTabId: sender?.tab?.id ?? null, hasActive: Boolean(state.active), running: state.running });
         const active = state.active;
         const source = firebaseSender(sender);
         if (!source || !active || !state.running || sender.tab.id !== active.tabId) {

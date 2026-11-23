@@ -3,6 +3,12 @@ import { issueKey, LIMITS } from '../domain/model.js';
 import { readList, listUrl, matchRow, RESOLVE_HASH } from '../adapter/selection.js';
 
 const JOB = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const DEBUG = true;
+const debug = (event, details = {}) => {
+  if (!DEBUG) return;
+  console.info('[CrashBridge capture]', event, details);
+  try { globalThis.chrome?.runtime?.sendMessage?.({ namespace: 'crashbridge', version: 1, type: 'LOG_EVENT', payload: { event, details } })?.catch?.(() => {}); } catch { /* best effort */ }
+};
 
 /** @param {string} url @returns {{jobId:string,issue:object}|null} */
 export function parseCaptureJob(url) {
@@ -63,21 +69,28 @@ export function mountContent(environment = {}) {
   let initialJob = parseCaptureJob(window.location.href);
   let initialBinding = binding(initialJob);
   let queriedJob = null;
-  let querySent = false;
+  let queryInFlight = false;
+  let queryAttempts = 0;
   const queryActiveJob = async () => {
-    if (querySent) return;
-    querySent = true;
+    if (queryInFlight || queriedJob || queryAttempts >= 5) return;
+    queryInFlight = true;
+    queryAttempts += 1;
     try {
+      debug('query-active-job:start');
       const reply = await runtime.sendMessage({ namespace: 'crashbridge', version: 1, type: 'QUERY_ACTIVE_JOB', payload: {} });
-      if (reply?.ok && reply.data && !disposed) {
+      debug('query-active-job:reply', { ok: reply?.ok === true, hasData: Boolean(reply?.data?.jobId) });
+      if (reply?.ok && reply.data?.jobId && reply.data?.issue && !disposed) {
         queriedJob = reply.data;
-        if (!initialJob) { initialJob = queriedJob; initialBinding = binding(queriedJob); }
+        // After the URL token was stripped the background's job is the authority;
+        // rebind so token disappearance alone never counts as a navigation change.
+        if (!job) { initialJob = queriedJob; initialBinding = binding(queriedJob); navigationInvalidated = false; }
         schedule();
       }
-    } catch { /* Background unreachable; URL-based jobs still work. */ }
+    } catch (error) { debug('query-active-job:error', { message: error?.message ?? 'unknown' }); }
+    finally { queryInFlight = false; }
   };
-  if (!initialJob && !resolveToken && parseIssueUrl(window.location.href)) void queryActiveJob();
   let navigationInvalidated = false;
+  if (!parseCaptureJob(window.location.href) && !resolveToken && parseIssueUrl(window.location.href)) void queryActiveJob();
   let disposed = false;
   let scheduled = false;
   let job = null;
@@ -86,25 +99,33 @@ export function mountContent(environment = {}) {
 
   /** @param {object|null} capture @param {{code:string,message:string}|null} error */
   async function submit(capture, error) {
-    if (!job || completed.has(job.jobId) || disposed) return;
+    if (!job || completed.has(job.jobId) || disposed) { debug('submit:skipped', { hasJob: Boolean(job), completed: Boolean(job && completed.has(job.jobId)), disposed }); return; }
     const current = job;
+    debug('submit:start', { hasCapture: Boolean(capture), errorCode: error?.code ?? null });
     completed.add(current.jobId);
     if (timer !== null) clearTimer(timer);
     timer = null;
     status.textContent = error ? `采集失败：${error.code}` : '正在保存采集结果…';
     try {
       const reply = await runtime.sendMessage({ namespace: 'crashbridge', version: 1, type: 'CAPTURE_RESULT', payload: { jobId: current.jobId, issueKey: issueKey(current.issue), capture, error } });
+      debug('submit:reply', { ok: reply?.ok === true, errorCode: reply?.error?.code ?? null });
       if (!disposed && job?.jobId === current.jobId) status.textContent = reply?.ok ? (error ? `采集失败：${error.code}` : '采集结果已保存。') : `采集结果未保存：${reply?.error?.code ?? 'unsupported'}`;
-    } catch {
+    } catch (submitError) {
+      debug('submit:error', { message: submitError?.message ?? 'unknown' });
       if (!disposed && job?.jobId === current.jobId) status.textContent = '采集结果未发送，请在管理页查看失败状态并重试。';
     }
   }
 
   function syncJob() {
-    const next = parseCaptureJob(window.location.href) ?? queriedJob;
-    // A URL change cannot establish ownership of a retained SPA stack. Only a new
-    // document may bind a new job/issue/event; invalidation is sticky even on return.
-    if (binding(next) !== initialBinding) navigationInvalidated = true;
+    const urlJob = parseCaptureJob(window.location.href);
+    // Firebase strips the job query/hash token after load; the background owns the
+    // capture tab identity, so ask it for the active job instead of dropping to null.
+    if (!urlJob && !resolveToken && !queriedJob && parseIssueUrl(window.location.href)) void queryActiveJob();
+    const next = urlJob ?? queriedJob;
+    debug('sync-job', { hasUrlJob: Boolean(urlJob), hasQueriedJob: Boolean(queriedJob), readyState: document.readyState, navigationInvalidated });
+    // Token disappearance (next === null) is recoverable; a different real job in this
+    // document is a navigation change and stays sticky.
+    if (next && binding(next) !== initialBinding) navigationInvalidated = true;
     if (binding(next) !== binding(job)) {
       if (timer !== null) clearTimer(timer);
       timer = null;
@@ -117,7 +138,7 @@ export function mountContent(environment = {}) {
         }, LIMITS.timeoutMs);
       }
     }
-    if (!job) return;
+    if (!job) { debug('sync-job:no-job'); return; }
     if (navigationInvalidated) {
       status.textContent = '采集失败：unsupported（同一页面内采集身份已改变，请在新标签页重试）';
       void submit(null, { code: 'unsupported', message: 'Capture identity changed within this document; retry in a new capture tab.' });
@@ -125,11 +146,13 @@ export function mountContent(environment = {}) {
     }
     if (completed.has(job.jobId)) return;
     if (document.readyState !== 'complete') {
+      debug('sync-job:waiting-load');
       status.textContent = '等待页面加载完成（最多 60 秒）';
       return;
     }
-    try { void submit(extractCapture(document, job.issue, now()), null); }
+    try { debug('extract:start'); void submit(extractCapture(document, job.issue, now()), null); }
     catch (error) {
+      debug('extract:error', { code: error?.code ?? 'unknown', message: error?.message ?? 'unknown' });
       pendingError = { code: ['login-required', 'missing-stack', 'unsupported'].includes(error.code) ? error.code : 'unsupported', message: error.message };
       status.textContent = `等待详情 DOM：${pendingError.code}（最多 60 秒）`;
       if (pendingError.code === 'login-required') void submit(null, pendingError);

@@ -1,6 +1,17 @@
 import { createController } from './queue.js';
 import { createResolver } from './resolver.js';
 import { listUrl } from '../adapter/selection.js';
+import { log, logCapture, remoteLog, toMarkdown } from './logger.js';
+
+const flushLog = async () => {
+  try {
+    const blob = new Blob([toMarkdown()], { type: 'text/markdown;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    await chrome.downloads.download({ url, filename: 'crashbridge-log.md', saveAs: false, conflictAction: 'overwrite' });
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+  } catch (error) { log('flush-log:error', { message: error?.message ?? 'unknown' }); }
+};
+log('service-worker:start');
 
 const STORAGE_KEY = 'crashbridge';
 const SESSION_KEY = 'crashbridge-resolution';
@@ -44,6 +55,15 @@ const serialize = operation => {
 const resolverTypes = ['RESOLVE_SELECTION', 'GET_RESOLUTION', 'CANCEL_RESOLUTION', 'RESOLVER_READY'];
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   serialize(async () => {
+    if (message?.type === 'GET_LOGS') {
+      if (message.namespace !== 'crashbridge' || message.version !== 1 || sender.id !== chrome.runtime.id) return { ok: true, data: null };
+      return { ok: true, data: toMarkdown() };
+    }
+    if (message?.type === 'LOG_EVENT') {
+      if (message.namespace !== 'crashbridge' || message.version !== 1 || sender.id !== chrome.runtime.id || sender.frameId !== 0) return { ok: true, data: {} };
+      remoteLog(String(message.payload?.event ?? 'unknown').slice(0, 200), message.payload?.details ?? null);
+      return { ok: true, data: {} };
+    }
     if (resolverTypes.includes(message?.type)) return resolver.handle(message, sender);
     if (message?.type === 'OPEN_MANAGER') {
       if (message.namespace !== 'crashbridge' || message.version !== 1 || sender.id !== new URL(browser.extensionUrl('manager.html')).host || sender.frameId !== 0 || !Number.isInteger(sender.tab?.id) || !listUrl(sender.url) || !message.payload || typeof message.payload !== 'object' || Array.isArray(message.payload) || Object.keys(message.payload).length || new TextEncoder().encode(JSON.stringify(message)).length > 262144) throw new Error('Invalid manager opener source.');
@@ -51,15 +71,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       return { ok: true, data: {} };
     }
     if (['START_CAPTURE', 'RETRY_FAILED'].includes(message?.type) && resolver.busy()) throw new Error('Resolution is active; cancel it from the source list first.');
-    return controller.handle(message, sender);
-  }).then(sendResponse, () => sendResponse({ ok: false, error: { code: 'unsupported', message: 'Operation unavailable or conflicts with active resolution; refresh Firebase or cancel resolution first.' } }));
+    const wasRunning = message?.type === 'START_CAPTURE' || message?.type === 'RETRY_FAILED' || message?.type === 'CAPTURE_RESULT';
+    const result = await controller.handle(message, sender);
+    if (wasRunning && !result?.data?.running) { log('capture:batch-ended', { ok: result?.ok === true }); void flushLog(); }
+    return result;
+  }).then(sendResponse, (error) => { log('message:error', { message: error?.message ?? 'unknown' }); sendResponse({ ok: false, error: { code: 'unsupported', message: 'Operation unavailable or conflicts with active resolution; refresh Firebase or cancel resolution first.' } }); });
   return true;
 });
 chrome.alarms.onAlarm.addListener(alarm => {
   if (!alarm.name.startsWith(ALARM_PREFIX)) return;
   void serialize(() => alarm.name.startsWith(`${ALARM_PREFIX}resolve:`)
     ? resolver.timeout(alarm.name.slice(`${ALARM_PREFIX}resolve:`.length))
-    : controller.handle({ namespace: 'crashbridge', version: 1, type: 'TIMEOUT', payload: { jobId: alarm.name.slice(ALARM_PREFIX.length) } }));
+    : controller.handle({ namespace: 'crashbridge', version: 1, type: 'TIMEOUT', payload: { jobId: alarm.name.slice(ALARM_PREFIX.length) } }).then(result => { log('alarm:timeout-fired', { ok: result?.ok === true }); void flushLog(); return result; }));
 });
 chrome.tabs.onRemoved.addListener(tabId => {
   void serialize(async () => {

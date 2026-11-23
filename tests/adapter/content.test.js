@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseCaptureJob, mountContent } from '../../src/content/app.js';
 import { parseMessage } from '../../src/domain/protocol.js';
+import { parseIssueUrl } from '../../src/adapter/firebase.js';
 import { element, makeDocument, stackDocument, addIssueRow, browserEnvironment, flush, ISSUE_URL, URL_BASE, STACK } from './fake-dom.js';
 const UUID = '12345678-1234-4234-8234-123456789abc';
 const JOB_URL = `${ISSUE_URL}?crashbridge-job=${UUID}`;
@@ -101,6 +102,35 @@ test('missing stacks wait until deadline and fail visibly without empty success'
   assert.equal(environment.sent[0].payload.capture, null); assert.equal(environment.sent[0].payload.error.code, 'missing-stack');
   assert.match(root(document).textContent, /采集失败/);
   environment.observers[0].emit(); await flush(); assert.equal(environment.sent.length, 1);
+  app.dispose();
+});
+
+test('capture survives Firebase stripping the query token by re-querying the background', async () => {
+  const { document } = stackDocument(JOB_URL);
+  document.readyState = 'loading';
+  const environment = browserEnvironment(document);
+  // The background owns the capture tab; its reply restores the job after the token is stripped.
+  environment.runtime.sendMessage = async message => {
+    environment.sent.push(message);
+    if (message.type === 'QUERY_ACTIVE_JOB') {
+      return { ok: true, data: { jobId: UUID, issue: parseIssueUrl(ISSUE_URL) } };
+    }
+    return { ok: true, data: {} };
+  };
+  const app = mountContent(environment);
+  assert.equal(environment.sent.filter(m => m.type === 'QUERY_ACTIVE_JOB').length, 0, 'mount with URL token must not query');
+  assert.equal(environment.sent.filter(m => m.type === 'CAPTURE_RESULT').length, 0, 'loading document must not submit');
+  // Firebase finishes loading and strips ?crashbridge-job=…
+  document.readyState = 'complete';
+  await navigate(environment, ISSUE_URL);
+  assert.ok(environment.sent.some(m => m.type === 'QUERY_ACTIVE_JOB'), 'must query background after token loss');
+  // Background reply adopts the job; the stack DOM already present triggers the capture.
+  await flush(); await flush(); await flush();
+  const capture = environment.sent.find(m => m.type === 'CAPTURE_RESULT');
+  assert.ok(capture, 'CAPTURE_RESULT must be sent after the background job is adopted');
+  assert.equal(parseMessage(capture).payload.jobId, UUID);
+  assert.equal(parseMessage(capture).payload.capture.stacktrace, STACK);
+  assert.match(root(document).textContent, /已保存/);
   app.dispose();
 });
 
@@ -222,12 +252,15 @@ test('a document initially without a job rejects an SPA-added job and binding in
   assert.equal(environment.sent[0].payload.capture, null);
   assert.equal(environment.sent[0].payload.error.code, 'unsupported');
   app.dispose();
+  // A different job appearing in the same document is a real navigation change: sticky.
   const waiting = stackDocument(JOB_URL).document; waiting.readyState = 'interactive';
   const second = browserEnvironment(waiting); const secondApp = mountContent(second);
-  await navigate(second, ISSUE_URL); assert.equal(second.sent.length, 0);
-  waiting.readyState = 'complete'; await navigate(second, JOB_URL);
-  assert.equal(second.sent[0].payload.capture, null);
-  assert.equal(second.sent[0].payload.error.code, 'unsupported'); secondApp.dispose();
+  await navigate(second, ISSUE_URL);
+  assert.equal(second.sent.filter(m => m.type === 'CAPTURE_RESULT').length, 0);
+  waiting.readyState = 'complete'; await navigate(second, JOB_URL.replace(UUID, NEXT_UUID));
+  const result = second.sent.find(m => m.type === 'CAPTURE_RESULT');
+  assert.equal(result.payload.capture, null);
+  assert.equal(result.payload.error.code, 'unsupported'); secondApp.dispose();
 });
 
 test('visibility attribute changes trigger a retry without mocking extraction', async () => {
